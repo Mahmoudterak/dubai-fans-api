@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "paths": {
+      "@workspace/db":                                  ["./src/vendor/db/index.ts"],
+      "@workspace/db/migrate":                          ["./src/vendor/db/migrate.ts"],
+      "@workspace/db/schema":                           ["./src/vendor/db/schema/index.ts"],
+      "@workspace/api-zod":                             ["./src/vendor/api-zod/index.ts"],
+      "@workspace/blog-data":                           ["./src/vendor/blog-data/index.ts"],
+      "@workspace/integrations-openai-ai-server":       ["./src/vendor/integrations-openai/index.ts"],
+      "@workspace/integrations-openai-ai-server/batch": ["./src/vendor/integrations-openai/batch/index.ts"],
+      "@workspace/integrations-openai-ai-server/image": ["./src/vendor/integrations-openai/image/index.ts"],
+      "@workspace/integrations-openai-ai-server/audio": ["./src/vendor/integrations-openai/audio/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "build.mjs", "drizzle.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

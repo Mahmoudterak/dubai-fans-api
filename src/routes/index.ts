@@ -1,0 +1,46 @@
+import { Router, type IRouter } from "express";
+import healthRouter from "./health";
+import storageRouter from "./storage";
+import analyzeRouter from "./analyze";
+import toolsRouter from "./tools";
+import notificationsRouter from "./notifications";
+import blogRouter from "./blog";
+import seoReportRouter from "./seo-report";
+import courseRegisterRouter from "./course-register";
+import studentAuthRouter from "./student-auth";
+import studentDashboardRouter from "./student-dashboard";
+import aiBusinessOSRouter from "./ai-business-os";
+import companyAuthRouter from "./company-auth";
+import adminClientsRouter from "./admin-clients";
+import adminAibosLeadsRouter from "./admin-aibos-leads";
+import companyReportsRouter from "./company-reports";
+import websiteOrdersRouter from "./website-orders";
+import adminWebsiteOrdersRouter from "./admin-website-orders";
+import businessAuditRouter from "./business-audit";
+import adminBusinessAuditsRouter from "./admin-business-audits";
+import demoRequestsRouter from "./demo-requests";
+
+const router: IRouter = Router();
+
+router.use(healthRouter);
+router.use(analyzeRouter);
+router.use(toolsRouter);
+router.use(notificationsRouter);
+router.use(blogRouter);
+router.use(seoReportRouter);
+router.use(courseRegisterRouter);
+router.use(studentAuthRouter);
+router.use(studentDashboardRouter);
+router.use(aiBusinessOSRouter);
+router.use(companyAuthRouter);
+router.use(adminClientsRouter);
+router.use(adminAibosLeadsRouter);
+router.use(companyReportsRouter);
+router.use(websiteOrdersRouter);
+router.use(adminWebsiteOrdersRouter);
+router.use(businessAuditRouter);
+router.use(adminBusinessAuditsRouter);
+router.use(demoRequestsRouter);
+router.use(storageRouter);
+
+export default router;

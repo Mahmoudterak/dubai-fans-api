@@ -1,0 +1,132 @@
+/**
+ * Admin: AI Business Audit requests (طلبات تحليل النشاط التجاري)
+ *
+ * All routes require the admin session cookie (df_admin_session).
+ *
+ *   GET   /api/admin/business-audits       — list all audit leads (newest first)
+ *   GET   /api/admin/business-audits/:id   — full row including the AI report
+ *   PATCH /api/admin/business-audits/:id   — update lead status
+ */
+import { createHmac, timingSafeEqual } from "crypto";
+import { Router, type IRouter, type Request, type Response } from "express";
+import { db, businessAudits } from "@workspace/db";
+import { desc, eq } from "drizzle-orm";
+import { logger } from "../lib/logger";
+
+// ── Admin session helpers (mirrors admin-website-orders.ts) ──────────────────
+const SESSION_COOKIE = "df_admin_session";
+
+function validateToken(token: string, adminPassword: string): boolean {
+  const dot = token.indexOf(".");
+  if (dot === -1) return false;
+  const expires = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  if (parseInt(expires, 16) < Date.now()) return false;
+  const expected = createHmac("sha256", adminPassword).update(expires).digest("hex");
+  try {
+    return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
+  } catch { return false; }
+}
+
+function checkAdminSession(req: Request, res: Response): boolean {
+  const pwd = process.env.ADMIN_PASSWORD;
+  if (!pwd) {
+    res.status(503).json({ error: "ADMIN_PASSWORD not configured on the server" });
+    return false;
+  }
+  const token: string | undefined = (req.cookies as Record<string, string>)?.[SESSION_COOKIE];
+  if (!token || !validateToken(token, pwd)) {
+    res.status(401).json({ status: 401, error: "جلسة منتهية — يرجى تسجيل الدخول من جديد" });
+    return false;
+  }
+  return true;
+}
+
+function checkCsrf(req: Request, res: Response): boolean {
+  if (req.headers["x-requested-with"] !== "fetch") {
+    res.status(403).json({ error: "طلب غير مصرّح به" });
+    return false;
+  }
+  return true;
+}
+
+const VALID_STATUSES = ["new", "contacted", "interested", "not_interested"] as const;
+
+const router: IRouter = Router();
+
+// ── GET /api/admin/business-audits ────────────────────────────────────────────
+router.get("/admin/business-audits", async (req: Request, res: Response): Promise<void> => {
+  if (!checkAdminSession(req, res)) return;
+  try {
+    const audits = await db.select({
+      id:           businessAudits.id,
+      name:         businessAudits.name,
+      email:        businessAudits.email,
+      phone:        businessAudits.phone,
+      companyName:  businessAudits.companyName,
+      businessType: businessAudits.businessType,
+      country:      businessAudits.country,
+      city:         businessAudits.city,
+      targets:      businessAudits.targets,
+      status:       businessAudits.status,
+      createdAt:    businessAudits.createdAt,
+    }).from(businessAudits).orderBy(desc(businessAudits.createdAt));
+    res.json({ audits });
+  } catch (err) {
+    logger.error({ err }, "[admin-business-audits] list error");
+    res.status(500).json({ error: "حدث خطأ أثناء جلب الطلبات" });
+  }
+});
+
+// ── GET /api/admin/business-audits/:id ────────────────────────────────────────
+router.get("/admin/business-audits/:id", async (req: Request, res: Response): Promise<void> => {
+  if (!checkAdminSession(req, res)) return;
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "معرّف غير صحيح" });
+      return;
+    }
+    const [audit] = await db.select().from(businessAudits).where(eq(businessAudits.id, id)).limit(1);
+    if (!audit) {
+      res.status(404).json({ error: "الطلب غير موجود" });
+      return;
+    }
+    res.json({ audit });
+  } catch (err) {
+    logger.error({ err }, "[admin-business-audits] get error");
+    res.status(500).json({ error: "حدث خطأ أثناء جلب الطلب" });
+  }
+});
+
+// ── PATCH /api/admin/business-audits/:id ──────────────────────────────────────
+router.patch("/admin/business-audits/:id", async (req: Request, res: Response): Promise<void> => {
+  if (!checkCsrf(req, res)) return;
+  if (!checkAdminSession(req, res)) return;
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "معرّف غير صحيح" });
+      return;
+    }
+    const { status } = req.body ?? {};
+    if (typeof status !== "string" || !VALID_STATUSES.includes(status as typeof VALID_STATUSES[number])) {
+      res.status(400).json({ error: "حالة غير صحيحة" });
+      return;
+    }
+    const [updated] = await db.update(businessAudits)
+      .set({ status })
+      .where(eq(businessAudits.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "الطلب غير موجود" });
+      return;
+    }
+    res.json({ audit: updated });
+  } catch (err) {
+    logger.error({ err }, "[admin-business-audits] update error");
+    res.status(500).json({ error: "حدث خطأ أثناء تحديث الطلب" });
+  }
+});
+
+export default router;
