@@ -22,6 +22,7 @@ import { cleanupExpiredResetTokens } from "./routes/company-auth.js";
 import { cleanupAibosAnonData } from "./lib/aibos-cleanup.js";
 import { logger } from "./lib/logger.js";
 import { expressToFetch } from "./lib/express-fetch-adapter.js";
+import { runUptimeCheck } from "./lib/uptime-monitor.js";
 
 // ── CF Workers type shims ──────────────────────────────────────────────────────
 
@@ -69,6 +70,93 @@ export default {
       return new Response(JSON.stringify({ status: "ok" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // ── Fast-path: public status page — no DB required ───────────────────────
+    // mtuaefans.com/status is routed to this Worker (see wrangler.toml).
+    // If STATUS_PAGE_URL is set (BetterStack hosted page), redirect there so
+    // users always land on an independently-hosted page that stays up even when
+    // this server is down.  Otherwise serve a minimal live-health HTML page.
+    if (method === "GET" && path === "/status") {
+      const statusPageUrl = env["STATUS_PAGE_URL"] as string | undefined;
+      if (statusPageUrl) {
+        return new Response(null, {
+          status: 301,
+          headers: {
+            Location: statusPageUrl,
+            "Cache-Control": "no-cache",
+          },
+        });
+      }
+      // Fallback: minimal branded status page that polls /api/healthz in-browser
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Service Status — Dubai Fans</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0;
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1.5rem; padding: 2rem;
+    }
+    .logo { font-size: 1.4rem; font-weight: 700; color: #f8fafc; }
+    .card {
+      background: #1e293b; border: 1px solid #334155; border-radius: 1rem;
+      padding: 2rem 2.5rem; width: 100%; max-width: 480px; text-align: center;
+    }
+    .dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      display: inline-block; margin-right: .5rem; vertical-align: middle;
+    }
+    .ok  { background: #22c55e; box-shadow: 0 0 8px #22c55e88; }
+    .err { background: #ef4444; box-shadow: 0 0 8px #ef444488; }
+    .checking { background: #94a3b8; animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .msg { font-size: 1.1rem; font-weight: 600; vertical-align: middle; }
+    .sub { margin-top: .75rem; font-size: .85rem; color: #94a3b8; }
+    .ts  { margin-top: .5rem; font-size: .75rem; color: #64748b; }
+    a { color: #60a5fa; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="logo">Dubai Fans — دبي فانز</div>
+  <div class="card">
+    <span class="dot checking" id="dot"></span>
+    <span class="msg" id="msg">Checking…</span>
+    <p class="sub">Dubai Fans API — <a href="https://mtuaefans.com">mtuaefans.com</a></p>
+    <p class="ts" id="ts"></p>
+  </div>
+  <script>
+    async function check() {
+      const dot = document.getElementById('dot');
+      const msg = document.getElementById('msg');
+      const ts  = document.getElementById('ts');
+      try {
+        const r = await fetch('/api/healthz', { cache: 'no-store' });
+        dot.className = 'dot ' + (r.ok ? 'ok' : 'err');
+        msg.textContent = r.ok ? 'All systems operational' : 'Service disruption detected';
+      } catch {
+        dot.className = 'dot err';
+        msg.textContent = 'Service unreachable';
+      }
+      ts.textContent = 'Last checked: ' + new Date().toUTCString();
+    }
+    check();
+    setInterval(check, 30000);
+  </script>
+</body>
+</html>`;
+      return new Response(html, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
       });
     }
 
@@ -149,6 +237,15 @@ export default {
   },
 
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    // ── 1-minute uptime check — no DB required ──────────────────────────────
+    // Runs independently of the DB so a database outage never silences alerts.
+    if (event.cron === "* * * * *") {
+      logger.info("scheduled: running uptime check");
+      await runUptimeCheck(env as Record<string, unknown>);
+      return;
+    }
+
+    // ── DB-backed maintenance crons ──────────────────────────────────────────
     const connStr = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
     if (!connStr) {
       logger.error("scheduled: no database connection — skipping");
