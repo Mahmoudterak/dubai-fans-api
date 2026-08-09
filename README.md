@@ -160,6 +160,63 @@ pnpm db:generate
 
 ---
 
+## Deployment — Cloudflare Workers
+
+The API is also deployed as a Cloudflare Worker that proxies requests to the
+Railway origin, giving it a globally-distributed edge cache and Cloudflare's
+DDoS protection.
+
+### Manual deploy
+
+```bash
+# From the repo root
+pnpm build:worker
+pnpm exec wrangler deploy
+```
+
+Or trigger the **Deploy Worker** GitHub Actions workflow from the Actions tab.
+
+### GitHub Actions secrets required
+
+| Secret | Description |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | API token with Workers + R2 deploy permissions (see below) |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID |
+
+---
+
+## Cloudflare Token Runbook
+
+### Token details
+
+| Field | Value |
+|---|---|
+| **Token name** | `dubai-fans-worker-deploy` (or as named in the dashboard) |
+| **Required permissions** | Workers Scripts: Edit · Workers KV Storage: Edit · Workers R2 Storage: Edit · Account Settings: Read |
+| **Expiry** | Set to **No expiration** — verify at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens) |
+
+### Automated expiry check
+
+`.github/workflows/check-cf-token.yml` runs **every Monday at 08:00 UTC** and
+calls `wrangler whoami` to confirm the token is still valid. A failed run sends
+a GitHub notification before any real deploy is attempted.
+
+### Renewing / replacing the token
+
+1. Go to **Cloudflare Dashboard → My Profile → API Tokens**.
+2. Click the token name → **Roll** (or **Edit** to change expiry to _No expiry_).
+3. Copy the new token value.
+4. In **GitHub → Settings → Secrets → Actions**, update `CLOUDFLARE_API_TOKEN`
+   with the new value.
+5. Re-run the **Cloudflare Token Health Check** workflow manually to confirm it
+   passes before the next deploy.
+
+> **Rule of thumb:** always set the token expiry to *No expiration* for
+> automated CI/CD. If your security policy requires rotation, set a calendar
+> reminder one week before expiry and follow the steps above.
+
+---
+
 ## License
 
 MIT © Dubai Fans Digital Marketing

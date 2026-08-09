@@ -1,0 +1,65 @@
+name: Cloudflare Token Health Check
+
+# Runs every Monday at 08:00 UTC so a stale/expired token is caught well
+# before the next manual deploy attempt.
+#
+# What it does:
+#   1. Calls `wrangler whoami` with the production CLOUDFLARE_API_TOKEN.
+#   2. Fails the workflow (and sends a GitHub notification) if the token is
+#      invalid or expired.
+#
+# When this fails:
+#   - Check the token expiry in the Cloudflare dashboard:
+#     https://dash.cloudflare.com/profile/api-tokens
+#   - Renew / recreate the token (see README — "Cloudflare Token Runbook").
+#   - Update the CLOUDFLARE_API_TOKEN GitHub Actions secret with the new value.
+
+on:
+  schedule:
+    # Every Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+  # Allow manual trigger to test immediately
+  workflow_dispatch:
+
+jobs:
+  token-check:
+    name: Verify Cloudflare API token is valid
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install wrangler
+        run: npm install -g wrangler@latest
+
+      - name: Check token via wrangler whoami
+        run: |
+          set -euo pipefail
+
+          echo "Running: wrangler whoami"
+          OUTPUT=$(wrangler whoami 2>&1)
+          EXIT_CODE=$?
+
+          echo "$OUTPUT"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::wrangler whoami failed — the Cloudflare API token may be expired or invalid."
+            echo "::error::Renew the token at https://dash.cloudflare.com/profile/api-tokens and update the CLOUDFLARE_API_TOKEN GitHub Actions secret."
+            exit 1
+          fi
+
+          # Extra guard: wrangler exits 0 but prints an auth error in some versions
+          if echo "$OUTPUT" | grep -qi "authentication\|not authenticated\|unauthorized\|error"; then
+            echo "::error::wrangler whoami returned an auth error in its output — token may be expired."
+            echo "::error::Output: $OUTPUT"
+            echo "::error::Renew the token at https://dash.cloudflare.com/profile/api-tokens and update the CLOUDFLARE_API_TOKEN GitHub Actions secret."
+            exit 1
+          fi
+
+          echo "Token is valid."
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
