@@ -63,3 +63,47 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Send alert email on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          to: ${{ secrets.ADMIN_EMAIL }}
+          from: ${{ secrets.SMTP_USER }}
+          subject: "🚨 Cloudflare API token check FAILED — action required"
+          body: |
+            The weekly Cloudflare API token health check has FAILED.
+
+            This means the CLOUDFLARE_API_TOKEN used by GitHub Actions is
+            expired, revoked, or otherwise invalid. Deploys will fail until
+            this is resolved.
+
+            ── What to do ──────────────────────────────────────────────────
+
+            1. Go to Cloudflare Dashboard → My Profile → API Tokens:
+               https://dash.cloudflare.com/profile/api-tokens
+
+            2. Find the token named "dubai-fans-worker-deploy" (or similar).
+               Click Roll (or Edit to set expiry to "No expiration").
+
+            3. Copy the new token value.
+
+            4. In GitHub → Settings → Secrets → Actions, update the secret:
+               CLOUDFLARE_API_TOKEN = <new value>
+
+            5. Re-run the Cloudflare Token Health Check workflow manually to
+               confirm it passes before the next deploy:
+               https://github.com/${{ github.repository }}/actions/workflows/check-cf-token.yml
+
+            ── Full runbook ────────────────────────────────────────────────
+
+            See the "Cloudflare Token Runbook" section in the repository README:
+            https://github.com/${{ github.repository }}/blob/main/README.md#cloudflare-token-runbook
+
+            ── Workflow run ────────────────────────────────────────────────
+
+            Run URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}

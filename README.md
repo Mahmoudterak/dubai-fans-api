@@ -198,8 +198,20 @@ Or trigger the **Deploy Worker** GitHub Actions workflow from the Actions tab.
 ### Automated expiry check
 
 `.github/workflows/check-cf-token.yml` runs **every Monday at 08:00 UTC** and
-calls `wrangler whoami` to confirm the token is still valid. A failed run sends
-a GitHub notification before any real deploy is attempted.
+calls `wrangler whoami` to confirm the token is still valid. On failure the
+workflow **immediately sends an alert email** to `ADMIN_EMAIL` with renewal
+instructions and a direct link to the failed run — no waiting for someone to
+notice a GitHub notification.
+
+**GitHub Actions secrets required for the email alert:**
+
+| Secret | Description |
+|---|---|
+| `SMTP_HOST` | SMTP server hostname |
+| `SMTP_PORT` | SMTP server port (e.g. `587`) |
+| `SMTP_USER` | SMTP login / from address |
+| `SMTP_PASS` | SMTP password |
+| `ADMIN_EMAIL` | Recipient address for the alert |
 
 ### Renewing / replacing the token
 
