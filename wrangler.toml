@@ -8,6 +8,14 @@ workers_dev = true
 pattern = "mtuaefans.com/api/*"
 zone_name = "mtuaefans.com"
 
+[[routes]]
+pattern = "mtuaefans.com/status"
+zone_name = "mtuaefans.com"
+
+[[routes]]
+pattern = "mtuaefans.com/status/"
+zone_name = "mtuaefans.com"
+
 [[r2_buckets]]
 binding = "R2"
 bucket_name = "dubai-fans-storage"

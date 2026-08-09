@@ -80,9 +80,88 @@ For 1-minute polling use the **Starter** plan ($24/mo).
 
 ---
 
+## Status Page — BetterStack hosted (recommended)
+
+BetterStack includes a **free hosted status page** that lives on BetterStack's
+infrastructure — it stays up even when your server is down.
+
+### Enabling the status page
+
+1. In the BetterStack dashboard, go to **Status Pages** → **Create status page**.
+2. Fill in:
+   - **Name:** `Dubai Fans API Status`
+   - **Subdomain:** e.g. `dubaifans` → your page will be at `https://dubaifans.betteruptime.com`
+   - **Custom domain** *(optional)*: point a CNAME record from `status.mtuaefans.com`
+     to `dubaifans.betteruptime.com` and enter `status.mtuaefans.com` here.
+3. Under **Monitors on this page**, add the `Dubai Fans API` monitor you created above.
+4. Under **History**, enable **Show incident history** (default: on).
+5. Optionally set a logo, accent color, and company name.
+6. Click **Publish**.
+
+### Linking the status page to the app
+
+After you have the public URL (e.g. `https://dubaifans.betteruptime.com`):
+
+1. Set the `STATUS_PAGE_URL` environment variable in production:
+   ```
+   STATUS_PAGE_URL=https://dubaifans.betteruptime.com
+   ```
+2. The app's `/status` route (`mtuaefans.com/status`) will then issue a **301
+   redirect** to the BetterStack page automatically.
+3. Update `replit.md` with the final URL so the team can find it quickly.
+
+### What the status page shows
+
+- **Current status** — operational / degraded / outage banner
+- **Uptime percentage** — rolling 30-day and 90-day windows
+- **Response time graph** — P50/P95 latency over time
+- **Incident history** — every past incident with start time, duration, and
+  any posted updates
+
+---
+
+## UptimeRobot — alternative (free, 5-min interval)
+
+UptimeRobot free tier polls every **5 minutes**, same as GitHub Actions — no improvement.
+Use BetterStack or pay for UptimeRobot Pro ($7/mo) if you need sub-5-minute polling.
+
+If you still prefer UptimeRobot free:
+
+1. Sign up at <https://uptimerobot.com>.
+2. **Add New Monitor**:
+   - **Monitor type:** `HTTP(s)`
+   - **Friendly name:** `Dubai Fans API`
+   - **URL:** `https://mtuaefans.com/api/healthz`
+   - **Monitoring interval:** `5 minutes`
+3. Add alert contacts (email, Slack, etc.).
+4. Save.
+5. Go to **Status Pages** → **Create new** and add the monitor.
+
+---
+
 ## Secondary check (GitHub Actions)
 
 `dubai-fans-api/.github/workflows/uptime-monitor.yml` runs every 5 minutes as a
 backup. It is intentionally kept alongside the primary CF cron to provide a
 second independent signal. No changes needed — it will auto-trigger on the
 `*/5 * * * *` schedule.
+
+---
+
+## Verification
+
+```bash
+# Confirm the endpoint returns 200
+curl -o /dev/null -s -w "%{http_code}\n" https://mtuaefans.com/api/healthz
+
+# Confirm the /status redirect is live
+curl -I https://mtuaefans.com/status
+```
+
+Expected output for `/healthz`: `200`
+Expected output for `/status`: `HTTP/2 301` (with `Location` pointing to the status page URL)
+
+To test alerting, temporarily deploy a version that returns a non-200 status and
+confirm the CF cron and/or BetterStack fires an alert within the expected interval.
+
+---

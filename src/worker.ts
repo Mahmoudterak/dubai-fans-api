@@ -66,10 +66,116 @@ export default {
     // The monitoring tool hits /api/healthz to check liveness. Requiring a DB
     // connection here means any transient Hyperdrive/Neon hiccup turns a healthy
     // Worker into a reported outage. Return immediately without touching the DB.
-    if (method === "GET" && path === "/api/healthz") {
-      return new Response(JSON.stringify({ status: "ok" }), {
+    //
+    // CORS: the public GitHub Pages status page (https://mahmoudterak.github.io)
+    // polls this endpoint from the browser. Without the Allow-Origin header the
+    // browser blocks the request and the status page always shows "unreachable".
+    if (path === "/api/healthz") {
+      const corsHeaders = {
+        "Access-Control-Allow-Origin": "https://mahmoudterak.github.io",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Max-Age": "86400",
+        // Prevent Cloudflare from caching a non-CORS response and serving it
+        // to requests that include an Origin header.
+        "Cache-Control": "no-store",
+        "Vary": "Origin",
+      } as const;
+      // Handle CORS pre-flight
+      if (method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+      }
+      if (method === "GET") {
+        return new Response(JSON.stringify({ status: "ok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
+    }
+
+    // ── Fast-path: public status page — no DB required ───────────────────────
+    // mtuaefans.com/status (and /status/) are routed to this Worker (wrangler.toml).
+    // If STATUS_PAGE_URL is set (GitHub Pages hosted status page), redirect there
+    // so users always land on an independently-hosted page that stays up even
+    // when this server is down. Otherwise serve a minimal live-health HTML page.
+    if (method === "GET" && (path === "/status" || path === "/status/")) {
+      const statusPageUrl = env["STATUS_PAGE_URL"] as string | undefined;
+      if (statusPageUrl) {
+        return new Response(null, {
+          status: 301,
+          headers: {
+            Location: statusPageUrl,
+            "Cache-Control": "no-cache",
+          },
+        });
+      }
+      // Fallback: minimal branded status page that polls /api/healthz in-browser
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Service Status — Dubai Fans</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0;
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1.5rem; padding: 2rem;
+    }
+    .logo { font-size: 1.4rem; font-weight: 700; color: #f8fafc; }
+    .card {
+      background: #1e293b; border: 1px solid #334155; border-radius: 1rem;
+      padding: 2rem 2.5rem; width: 100%; max-width: 480px; text-align: center;
+    }
+    .dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      display: inline-block; margin-right: .5rem; vertical-align: middle;
+    }
+    .ok  { background: #22c55e; box-shadow: 0 0 8px #22c55e88; }
+    .err { background: #ef4444; box-shadow: 0 0 8px #ef444488; }
+    .checking { background: #94a3b8; animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .msg { font-size: 1.1rem; font-weight: 600; vertical-align: middle; }
+    .sub { margin-top: .75rem; font-size: .85rem; color: #94a3b8; }
+    .ts  { margin-top: .5rem; font-size: .75rem; color: #64748b; }
+    a { color: #60a5fa; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="logo">Dubai Fans — دبي فانز</div>
+  <div class="card">
+    <span class="dot checking" id="dot"></span>
+    <span class="msg" id="msg">Checking…</span>
+    <p class="sub">Dubai Fans API — <a href="https://mtuaefans.com">mtuaefans.com</a></p>
+    <p class="ts" id="ts"></p>
+  </div>
+  <script>
+    async function check() {
+      const dot = document.getElementById('dot');
+      const msg = document.getElementById('msg');
+      const ts  = document.getElementById('ts');
+      try {
+        const r = await fetch('/api/healthz', { cache: 'no-store' });
+        dot.className = 'dot ' + (r.ok ? 'ok' : 'err');
+        msg.textContent = r.ok ? 'All systems operational' : 'Service disruption detected';
+      } catch {
+        dot.className = 'dot err';
+        msg.textContent = 'Service unreachable';
+      }
+      ts.textContent = 'Last checked: ' + new Date().toUTCString();
+    }
+    check();
+    setInterval(check, 30000);
+  </script>
+</body>
+</html>`;
+      return new Response(html, {
         status: 200,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
       });
     }
 
