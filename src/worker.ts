@@ -22,6 +22,7 @@ import { cleanupExpiredResetTokens } from "./routes/company-auth.js";
 import { cleanupAibosAnonData } from "./lib/aibos-cleanup.js";
 import { logger } from "./lib/logger.js";
 import { expressToFetch } from "./lib/express-fetch-adapter.js";
+import { runUptimeCheck } from "./lib/uptime-monitor.js";
 
 // ── CF Workers type shims ──────────────────────────────────────────────────────
 
@@ -149,6 +150,15 @@ export default {
   },
 
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    // ── 1-minute uptime check — no DB required ──────────────────────────────
+    // Runs independently of the DB so a database outage never silences alerts.
+    if (event.cron === "* * * * *") {
+      logger.info("scheduled: running uptime check");
+      await runUptimeCheck(env as Record<string, unknown>);
+      return;
+    }
+
+    // ── DB-backed maintenance crons ──────────────────────────────────────────
     const connStr = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
     if (!connStr) {
       logger.error("scheduled: no database connection — skipping");
