@@ -66,11 +66,26 @@ export default {
     // The monitoring tool hits /api/healthz to check liveness. Requiring a DB
     // connection here means any transient Hyperdrive/Neon hiccup turns a healthy
     // Worker into a reported outage. Return immediately without touching the DB.
-    if (method === "GET" && path === "/api/healthz") {
-      return new Response(JSON.stringify({ status: "ok" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    //
+    // CORS: the public GitHub Pages status page (https://mahmoudterak.github.io)
+    // polls this endpoint from the browser. Without the Allow-Origin header the
+    // browser blocks the request and the status page always shows "unreachable".
+    if (path === "/api/healthz") {
+      const corsHeaders = {
+        "Access-Control-Allow-Origin": "https://mahmoudterak.github.io",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Max-Age": "86400",
+      } as const;
+      // Handle CORS pre-flight
+      if (method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+      }
+      if (method === "GET") {
+        return new Response(JSON.stringify({ status: "ok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        });
+      }
     }
 
     // ── Fast-path: public status page — no DB required ───────────────────────
