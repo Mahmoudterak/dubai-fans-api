@@ -75,6 +75,10 @@ export default {
         "Access-Control-Allow-Origin": "https://mahmoudterak.github.io",
         "Access-Control-Allow-Methods": "GET, OPTIONS",
         "Access-Control-Max-Age": "86400",
+        // Prevent Cloudflare from caching a non-CORS response and serving it
+        // to requests that include an Origin header.
+        "Cache-Control": "no-store",
+        "Vary": "Origin",
       } as const;
       // Handle CORS pre-flight
       if (method === "OPTIONS") {
