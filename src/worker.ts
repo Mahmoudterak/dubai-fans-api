@@ -61,6 +61,17 @@ export default {
     const method = request.method;
     const path   = new URL(request.url).pathname;
 
+    // ── Fast-path: health probe — no DB required ────────────────────────────
+    // The monitoring tool hits /api/healthz to check liveness. Requiring a DB
+    // connection here means any transient Hyperdrive/Neon hiccup turns a healthy
+    // Worker into a reported outage. Return immediately without touching the DB.
+    if (method === "GET" && path === "/api/healthz") {
+      return new Response(JSON.stringify({ status: "ok" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     // ── Resolve DB connection string ─────────────────────────────────────────
     const connStr = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
     if (!connStr) {
