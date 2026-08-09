@@ -74,11 +74,11 @@ export default {
     }
 
     // ── Fast-path: public status page — no DB required ───────────────────────
-    // mtuaefans.com/status is routed to this Worker (see wrangler.toml).
-    // If STATUS_PAGE_URL is set (BetterStack hosted page), redirect there so
-    // users always land on an independently-hosted page that stays up even when
-    // this server is down.  Otherwise serve a minimal live-health HTML page.
-    if (method === "GET" && path === "/status") {
+    // mtuaefans.com/status (and /status/) are routed to this Worker (wrangler.toml).
+    // If STATUS_PAGE_URL is set (GitHub Pages hosted status page), redirect there
+    // so users always land on an independently-hosted page that stays up even
+    // when this server is down. Otherwise serve a minimal live-health HTML page.
+    if (method === "GET" && (path === "/status" || path === "/status/")) {
       const statusPageUrl = env["STATUS_PAGE_URL"] as string | undefined;
       if (statusPageUrl) {
         return new Response(null, {
