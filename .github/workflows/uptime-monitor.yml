@@ -1,0 +1,49 @@
+name: Uptime Monitor
+
+# Ping https://mtuaefans.com/api/healthz every 5 minutes.
+# A non-200 response or network error fails the workflow run, which triggers
+# GitHub's built-in email/notification alerts.
+#
+# Target: Cloudflare Worker at mtuaefans.com/api/*
+# NOT the old Railway (dubai-fans-api.up.railway.app) or Replit dev URLs.
+
+on:
+  schedule:
+    # Every 5 minutes (GitHub Actions minimum granularity)
+    - cron: '*/5 * * * *'
+  # Allow a manual trigger to test the check immediately
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    name: Ping /api/healthz
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check https://mtuaefans.com/api/healthz
+        run: |
+          set -euo pipefail
+
+          URL="https://mtuaefans.com/api/healthz"
+          TIMEOUT=30   # seconds — matches Railway healthcheckTimeout
+
+          echo "Checking $URL (timeout: ${TIMEOUT}s)"
+
+          HTTP_STATUS=$(curl \
+            --silent \
+            --show-error \
+            --max-time "$TIMEOUT" \
+            --write-out "%{http_code}" \
+            --output /tmp/health_body \
+            "$URL")
+
+          BODY=$(cat /tmp/health_body)
+          echo "HTTP status : $HTTP_STATUS"
+          echo "Response body: $BODY"
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Health check FAILED — expected 200, got $HTTP_STATUS"
+            exit 1
+          fi
+
+          echo "Health check passed."
