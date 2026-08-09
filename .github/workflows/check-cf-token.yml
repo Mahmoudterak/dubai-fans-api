@@ -7,6 +7,13 @@ name: Cloudflare Token Health Check
 #   1. Calls `wrangler whoami` with the production CLOUDFLARE_API_TOKEN.
 #   2. Fails the workflow (and sends a GitHub notification) if the token is
 #      invalid or expired.
+#   3. On failure, sends an alert email via Resend API to ADMIN_EMAIL.
+#
+# Required GitHub Actions secrets:
+#   CLOUDFLARE_API_TOKEN  — Cloudflare API token to validate
+#   CLOUDFLARE_ACCOUNT_ID — Cloudflare account ID
+#   RESEND_API_KEY        — Resend API key for sending alert emails
+#   ADMIN_EMAIL           — Recipient address for alert emails
 #
 # When this fails:
 #   - Check the token expiry in the Cloudflare dashboard:
@@ -18,8 +25,13 @@ on:
   schedule:
     # Every Monday at 08:00 UTC
     - cron: '0 8 * * 1'
-  # Allow manual trigger to test immediately
+  # Allow manual trigger — set force_fail=true to test the alert email path
   workflow_dispatch:
+    inputs:
+      force_fail:
+        description: 'Set to "true" to force a failure and test the alert email'
+        required: false
+        default: 'false'
 
 jobs:
   token-check:
@@ -34,6 +46,13 @@ jobs:
 
       - name: Install wrangler
         run: npm install -g wrangler@latest
+
+      # Test step: deliberate failure when force_fail=true (used to verify alert email)
+      - name: Force failure (test mode only)
+        if: ${{ github.event.inputs.force_fail == 'true' }}
+        run: |
+          echo "::error::FORCE_FAIL=true — this is a deliberate test failure to verify the alert email."
+          exit 1
 
       - name: Check token via wrangler whoami
         run: |
@@ -66,44 +85,69 @@ jobs:
 
       - name: Send alert email on failure
         if: failure()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.SMTP_HOST }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          username: ${{ secrets.SMTP_USER }}
-          password: ${{ secrets.SMTP_PASS }}
-          to: ${{ secrets.ADMIN_EMAIL }}
-          from: ${{ secrets.SMTP_USER }}
-          subject: "🚨 Cloudflare API token check FAILED — action required"
-          body: |
-            The weekly Cloudflare API token health check has FAILED.
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
 
-            This means the CLOUDFLARE_API_TOKEN used by GitHub Actions is
-            expired, revoked, or otherwise invalid. Deploys will fail until
-            this is resolved.
+          if [ -z "${RESEND_API_KEY:-}" ]; then
+            echo "::warning::RESEND_API_KEY secret is not set — skipping alert email."
+            exit 0
+          fi
 
-            ── What to do ──────────────────────────────────────────────────
+          if [ -z "${ADMIN_EMAIL:-}" ]; then
+            echo "::warning::ADMIN_EMAIL secret is not set — skipping alert email."
+            exit 0
+          fi
 
-            1. Go to Cloudflare Dashboard → My Profile → API Tokens:
-               https://dash.cloudflare.com/profile/api-tokens
+          SUBJECT="🚨 Cloudflare API token check FAILED — action required"
+          RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
 
-            2. Find the token named "dubai-fans-worker-deploy" (or similar).
-               Click Roll (or Edit to set expiry to "No expiration").
+          BODY_HTML="<div style='font-family:Arial,sans-serif;max-width:600px;'>
+          <h2 style='color:#CC0000;'>🚨 Cloudflare API Token Check FAILED</h2>
+          <p>The weekly Cloudflare API token health check has <strong>FAILED</strong>.</p>
+          <p>This means the <code>CLOUDFLARE_API_TOKEN</code> used by GitHub Actions is
+          expired, revoked, or otherwise invalid. Deploys will fail until this is resolved.</p>
+          <hr/>
+          <h3>What to do</h3>
+          <ol>
+            <li>Go to <a href='https://dash.cloudflare.com/profile/api-tokens'>Cloudflare Dashboard → My Profile → API Tokens</a></li>
+            <li>Find the token named <strong>dubai-fans-worker-deploy</strong> (or similar).
+                Click Roll (or Edit to set expiry to \"No expiration\").</li>
+            <li>Copy the new token value.</li>
+            <li>In <strong>GitHub → Settings → Secrets → Actions</strong>, update the secret:
+                <code>CLOUDFLARE_API_TOKEN = &lt;new value&gt;</code></li>
+            <li>Re-run the Cloudflare Token Health Check workflow manually to confirm it passes.</li>
+          </ol>
+          <hr/>
+          <p><strong>Workflow run:</strong> <a href='${RUN_URL}'>${RUN_URL}</a></p>
+          <p><strong>Repo:</strong> ${REPO}</p>
+          </div>"
 
-            3. Copy the new token value.
+          HTTP_STATUS=$(curl --silent --show-error \
+            --write-out "%{http_code}" \
+            --output /tmp/resend_response.json \
+            --request POST \
+            --url "https://api.resend.com/emails" \
+            --header "Authorization: Bearer ${RESEND_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"from\": \"Dubai Fans Alerts <alerts@mtuaefans.com>\",
+              \"to\": [\"${ADMIN_EMAIL}\"],
+              \"subject\": \"${SUBJECT}\",
+              \"html\": $(echo "$BODY_HTML" | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read()))')
+            }")
 
-            4. In GitHub → Settings → Secrets → Actions, update the secret:
-               CLOUDFLARE_API_TOKEN = <new value>
+          echo "Resend API response (HTTP ${HTTP_STATUS}):"
+          cat /tmp/resend_response.json
+          echo ""
 
-            5. Re-run the Cloudflare Token Health Check workflow manually to
-               confirm it passes before the next deploy:
-               https://github.com/${{ github.repository }}/actions/workflows/check-cf-token.yml
+          if [ "$HTTP_STATUS" != "200" ] && [ "$HTTP_STATUS" != "201" ]; then
+            echo "::error::Alert email failed — Resend returned HTTP ${HTTP_STATUS}. Check RESEND_API_KEY and sender domain config."
+            exit 1
+          fi
 
-            ── Full runbook ────────────────────────────────────────────────
-
-            See the "Cloudflare Token Runbook" section in the repository README:
-            https://github.com/${{ github.repository }}/blob/main/README.md#cloudflare-token-runbook
-
-            ── Workflow run ────────────────────────────────────────────────
-
-            Run URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          echo "Alert email sent successfully to ${ADMIN_EMAIL}."
