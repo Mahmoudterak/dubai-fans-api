@@ -1,11 +1,16 @@
-name: Uptime Monitor
+name: Uptime Monitor (Secondary)
 
-# Ping https://mtuaefans.com/api/healthz every 5 minutes.
-# A non-200 response or network error fails the workflow run, which triggers
-# GitHub's built-in email/notification alerts.
+# SECONDARY backup check only.
+#
+# Primary monitoring: BetterStack Uptime (https://uptime.betterstack.com)
+#   - Monitor: https://mtuaefans.com/api/healthz
+#   - Interval: 1 minute  |  Timeout: 30 s  |  Alert: any non-200 response
+#
+# This workflow serves as a fallback because GitHub Actions enforces a minimum
+# 5-minute cron interval. It still catches prolonged outages and provides a
+# second independent signal. Keep it in place; do not rely on it as primary.
 #
 # Target: Cloudflare Worker at mtuaefans.com/api/*
-# NOT the old Railway (dubai-fans-api.up.railway.app) or Replit dev URLs.
 
 on:
   schedule:
@@ -16,7 +21,7 @@ on:
 
 jobs:
   health-check:
-    name: Ping /api/healthz
+    name: Ping /api/healthz (secondary)
     runs-on: ubuntu-latest
 
     steps:
@@ -25,7 +30,7 @@ jobs:
           set -euo pipefail
 
           URL="https://mtuaefans.com/api/healthz"
-          TIMEOUT=30   # seconds — matches Railway healthcheckTimeout
+          TIMEOUT=30   # seconds
 
           echo "Checking $URL (timeout: ${TIMEOUT}s)"
 
