@@ -15,7 +15,7 @@ import cookieParser from "cookie-parser";
 // ── Hoisted helpers ────────────────────────────────────────────────────────────
 // vi.hoisted runs before vi.mock() factories and before any imports, so these
 // values are available inside the mock factories below.
-const { MOCK_ADMIN, mockDb } = vi.hoisted(() => {
+const { MOCK_ADMIN, mockDb, makeDbChain } = vi.hoisted(() => {
   /** Generic chainable Drizzle ORM mock: every builder method returns itself;
    *  awaiting the chain resolves to `rows`. */
   function makeDbChain(rows: unknown[]) {
@@ -51,7 +51,7 @@ const { MOCK_ADMIN, mockDb } = vi.hoisted(() => {
     delete: () => makeDbChain([MOCK_ADMIN]),
   };
 
-  return { MOCK_ADMIN, mockDb };
+  return { MOCK_ADMIN, mockDb, makeDbChain };
 });
 
 // ── Module mocks ───────────────────────────────────────────────────────────────
@@ -73,6 +73,12 @@ vi.mock("@workspace/db", () => ({
   reportContent: {},
   // Enum / misc
   insertBlogPostSchema: { safeParse: () => ({ success: false, error: { issues: [] } }) },
+}));
+
+// portalAuth.ts imports schema tables directly (not via @workspace/db alias).
+vi.mock("../../vendor/db/schema/portal.js", () => ({
+  portalUsers: {},
+  portalAdminUsers: {},
 }));
 
 vi.mock("../../lib/sitemap", () => ({
@@ -350,5 +356,70 @@ describe("course-register.ts › GET /api/admin/course-enrollments", () => {
       .get("/api/admin/course-enrollments")
       .set("Cookie", validPortalAdminCookie());
     expect(res.status).toBe(200);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// blog.ts — deactivated admin lockout (isActive = false → 403)
+// ══════════════════════════════════════════════════════════════════════════════
+describe("blog.ts › DELETE /api/admin/blog/posts/:id — deactivated admin", () => {
+  const app = buildApp(blogRouter);
+
+  it("returns 403 when the token is valid but the admin account is inactive", async () => {
+    // Override the DB to return an inactive admin for this single request.
+    const inactiveAdmin = { ...MOCK_ADMIN, isActive: false };
+    vi.spyOn(mockDb, "select").mockReturnValueOnce(makeDbChain([inactiveAdmin]));
+
+    const res = await request(app)
+      .delete("/api/admin/blog/posts/test-post")
+      .set("Cookie", validPortalAdminCookie());
+
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ success: false, error: { code: "SUSPENDED" } });
+  });
+
+  it("returns 403 when the token is valid but the admin account is inactive (PATCH)", async () => {
+    const inactiveAdmin = { ...MOCK_ADMIN, isActive: false };
+    vi.spyOn(mockDb, "select").mockReturnValueOnce(makeDbChain([inactiveAdmin]));
+
+    const res = await request(app)
+      .patch("/api/admin/blog/posts/test-post")
+      .set("Cookie", validPortalAdminCookie())
+      .send({ title: "Updated title" });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ success: false, error: { code: "SUSPENDED" } });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// blog.ts — stale sessionVersion after password reset (→ 401)
+// ══════════════════════════════════════════════════════════════════════════════
+describe("blog.ts › DELETE /api/admin/blog/posts/:id — stale sessionVersion", () => {
+  const app = buildApp(blogRouter);
+
+  it("returns 401 when the token sessionVersion does not match the stored version", async () => {
+    // Stored admin still has sessionVersion 0; token was issued with version 99
+    // (simulating a password reset that bumped the stored version).
+    const staleToken = issueAdminToken(MOCK_ADMIN.id, 99);
+
+    const res = await request(app)
+      .delete("/api/admin/blog/posts/test-post")
+      .set("Cookie", `${PORTAL_ADMIN_SESSION_COOKIE}=${staleToken}`);
+
+    expect(res.status).toBe(401);
+    expect(res.body).toMatchObject({ success: false, error: { code: "SESSION_INVALIDATED" } });
+  });
+
+  it("returns 401 when the token sessionVersion does not match the stored version (PATCH)", async () => {
+    const staleToken = issueAdminToken(MOCK_ADMIN.id, 99);
+
+    const res = await request(app)
+      .patch("/api/admin/blog/posts/test-post")
+      .set("Cookie", `${PORTAL_ADMIN_SESSION_COOKIE}=${staleToken}`)
+      .send({ title: "Updated title" });
+
+    expect(res.status).toBe(401);
+    expect(res.body).toMatchObject({ success: false, error: { code: "SESSION_INVALIDATED" } });
   });
 });
