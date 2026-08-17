@@ -125,10 +125,30 @@ router.post("/portal/payments/ziina/create", requirePortalUser,
       const amountFils  = Math.round(amountAed * 100);
       const operationId = randomUUID();
 
-      const [payment] = await db.insert(portalPayments).values({
-        userId: user.id, orderId: resolvedOrderId, topupRequestId,
-        operationId, amount: amountAed.toFixed(2), currency, status: "pending",
-      }).returning();
+      // ── Duplicate-payment guard (concurrency-safe) ───────────────────────
+      // A partial unique index on portal_payments(order_id) covers status IN
+      // ('pending','processing','completed'). Two concurrent requests for the
+      // same order race at the index; only one INSERT succeeds. The loser
+      // receives PostgreSQL error 23505 (unique_violation) which we convert to
+      // HTTP 409 PAYMENT_IN_PROGRESS. Failed/cancelled payments are outside the
+      // index so a customer can retry after a payment is declined.
+      let payment: any;
+      try {
+        [payment] = await db.insert(portalPayments).values({
+          userId: user.id, orderId: resolvedOrderId, topupRequestId,
+          operationId, amount: amountAed.toFixed(2), currency, status: "pending",
+        }).returning();
+      } catch (insertErr: any) {
+        // PostgreSQL unique_violation — active payment already exists for this order
+        if (insertErr?.code === "23505" && resolvedOrderId !== null) {
+          res.status(409).json({
+            success: false,
+            error: { code: "PAYMENT_IN_PROGRESS", message: "A payment is already in progress for this order." },
+          });
+          return;
+        }
+        throw insertErr;
+      }
 
       const { successUrl, cancelUrl, failureUrl } = makeRedirectUrls(payment.id);
 

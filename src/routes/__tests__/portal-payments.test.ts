@@ -236,6 +236,57 @@ describe("POST /api/portal/payments/ziina/create", () => {
     expect(res.status).toBe(404);
   });
 
+  it("DB unique-constraint violation on order INSERT → 409 PAYMENT_IN_PROGRESS (concurrent duplicate)", async () => {
+    // Simulates the DB partial-unique-index rejection when a second payment for
+    // the same order races to insert while a pending/processing/completed one
+    // already exists. The SELECT pre-check cannot catch this race; only the
+    // index can — and it surfaces as PostgreSQL error code 23505.
+    const pgConflictErr = Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
+    mockDb.select.mockReturnValueOnce(
+      makeChain([{ id: 10, userId: 1, total: "500.00", walletTxId: null, status: "new", currency: "AED" }]),
+    );
+    // The payment INSERT throws the unique-constraint error
+    mockDb.insert.mockReturnValueOnce(makeInsertChain([], pgConflictErr));
+
+    const res = await request(app).post("/api/portal/payments/ziina/create").send({ orderId: 10 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe("PAYMENT_IN_PROGRESS");
+  });
+
+  it("DB unique-constraint violation covers processing status (payment mid-settlement)", async () => {
+    // A payment in 'processing' status (webhook in flight) is also covered by
+    // the partial unique index, so a new payment attempt is rejected.
+    const pgConflictErr = Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
+    mockDb.select.mockReturnValueOnce(
+      makeChain([{ id: 20, userId: 1, total: "300.00", walletTxId: null, status: "new", currency: "AED" }]),
+    );
+    mockDb.insert.mockReturnValueOnce(makeInsertChain([], pgConflictErr));
+
+    const res = await request(app).post("/api/portal/payments/ziina/create").send({ orderId: 20 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("PAYMENT_IN_PROGRESS");
+  });
+
+  it("23505 on top-up INSERT (operation_id conflict) → 500, not 409", async () => {
+    // For top-ups (no orderId), a 23505 comes from the operation_id unique
+    // constraint (UUID collision — effectively impossible but tested for safety).
+    // It must NOT be silently swallowed as a 409; it should propagate as 500.
+    const pgConflictErr = Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
+    // Top-up path: first insert is portalTopupRequests (succeeds), second is portalPayments (23505)
+    mockDb.insert
+      .mockReturnValueOnce(makeInsertChain([{ id: 7, userId: 1, amount: "200.00", paymentMethod: "ziina", status: "pending" }]))
+      .mockReturnValueOnce(makeInsertChain([], pgConflictErr));
+
+    const res = await request(app).post("/api/portal/payments/ziina/create").send({ topupAmount: 200 });
+
+    // 500 — not treated as PAYMENT_IN_PROGRESS since resolvedOrderId is null
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe("SERVER_ERROR");
+  });
+
   it("amount is ALWAYS taken from DB, not request body", async () => {
     const { createZiinaPaymentIntent } = await import("../../lib/ziina.js");
     mockDb.select.mockReturnValueOnce(makeChain([{ id: 10, userId: 1, total: "750.00", walletTxId: null, status: "new" }]));
