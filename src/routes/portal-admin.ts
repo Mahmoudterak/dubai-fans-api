@@ -591,29 +591,23 @@ router.get("/portal/admin/settings", requirePortalAdmin, async (_req: Request, r
   try {
     const rows = await db.select().from(portalSettings);
     const map = Object.fromEntries(rows.map(r => [r.key, r.value]));
-    // Return camelCase keys to match the admin UI contract
-    const data = {
-      vatEnabled: map["vat_enabled"] === "true",
-      vatRate: map["vat_rate"] ?? "5.00",
-    };
-    res.json({ success: true, data });
+    res.json({ success: true, data: map });
   } catch (err) { logger.error({ err }); res.status(500).json({ success: false, error: { code: "SERVER_ERROR" } }); }
 });
 
 router.put("/portal/admin/settings", requirePortalAdmin, requireRole("super_admin", "manager"), async (req: Request, res: Response): Promise<void> => {
-  // Accept camelCase keys to match the admin UI contract
   const parsed = z.object({
-    vatEnabled: z.boolean().optional(),
-    vatRate:    z.number().min(0).max(100).optional(),
+    vat_enabled: z.boolean().optional(),
+    vat_rate:    z.number().min(0).max(100).optional(),
   }).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR" } }); return; }
   const adm = admin(req);
   try {
     const updates: Array<{ key: string; value: string }> = [];
-    if (parsed.data.vatEnabled !== undefined)
-      updates.push({ key: "vat_enabled", value: String(parsed.data.vatEnabled) });
-    if (parsed.data.vatRate !== undefined)
-      updates.push({ key: "vat_rate", value: parsed.data.vatRate.toFixed(2) });
+    if (parsed.data.vat_enabled !== undefined)
+      updates.push({ key: "vat_enabled", value: String(parsed.data.vat_enabled) });
+    if (parsed.data.vat_rate !== undefined)
+      updates.push({ key: "vat_rate", value: parsed.data.vat_rate.toFixed(2) });
     for (const u of updates) {
       await db.insert(portalSettings).values({ key: u.key, value: u.value })
         .onConflictDoUpdate({ target: portalSettings.key, set: { value: u.value, updatedAt: new Date() } });

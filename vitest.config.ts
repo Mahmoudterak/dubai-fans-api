@@ -1,9 +1,9 @@
 import { defineConfig } from "vitest/config";
-import path from "path";
 import { fileURLToPath } from "url";
+import { resolve } from "path";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
-const r = (p: string) => path.resolve(__dirname, p);
+const r = (p: string) => resolve(__dirname, p);
 
 export default defineConfig({
   test: {
