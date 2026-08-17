@@ -325,6 +325,27 @@ export type PortalAuditLog = typeof portalAuditLogs.$inferSelect;
 // Stores third-party OAuth identities linked to portal_users.
 // Designed for Google now; add Apple and others by inserting new provider values.
 // Unique constraint on (provider, provider_subject) prevents duplicate identities.
+// ── Payments (Ziina) ───────────────────────────────────────────────────────────
+export const portalPayments = pgTable("portal_payments", {
+  id:                serial("id").primaryKey(),
+  userId:            integer("user_id").notNull().references(() => portalUsers.id, { onDelete: "cascade" }),
+  orderId:           integer("order_id").references(() => portalOrders.id, { onDelete: "set null" }),
+  topupRequestId:    integer("topup_request_id").references(() => portalTopupRequests.id, { onDelete: "set null" }),
+  provider:          text("provider").notNull().default("ziina"),
+  providerPaymentId: text("provider_payment_id").unique(),
+  operationId:       text("operation_id").unique().notNull(),
+  amount:            numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  currency:          text("currency").notNull().default("AED"),
+  status:            text("status").notNull().default("pending"), // pending|completed|failed|cancelled|refunded
+  failureReason:     text("failure_reason"),
+  metadata:          jsonb("metadata"),
+  completedAt:       timestamp("completed_at", { withTimezone: true }),
+  createdAt:         timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:         timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type PortalPayment = typeof portalPayments.$inferSelect;
+
+// ── User identities (OAuth) ────────────────────────────────────────────────────
 export const userIdentities = pgTable("user_identities", {
   id:              serial("id").primaryKey(),
   userId:          integer("user_id").notNull().references(() => portalUsers.id, { onDelete: "cascade" }),
