@@ -5,7 +5,7 @@
  */
 import {
   pgTable, serial, text, timestamp, integer,
-  boolean, numeric, jsonb, pgEnum,
+  boolean, numeric, jsonb, pgEnum, uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // ── Enums ──────────────────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ export const portalUsers = pgTable("portal_users", {
   id:             serial("id").primaryKey(),
   fullName:       text("full_name").notNull(),
   email:          text("email").notNull().unique(),
-  passwordHash:   text("password_hash").notNull(),
+  passwordHash:   text("password_hash"),   // nullable: Google-only accounts have no password
   mobile:         text("mobile"),
   country:        text("country"),
   isActive:       boolean("is_active").notNull().default(true),
@@ -320,3 +320,20 @@ export const portalAuditLogs = pgTable("portal_audit_logs", {
   createdAt:   timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 export type PortalAuditLog = typeof portalAuditLogs.$inferSelect;
+
+// ── User identities (OAuth) ────────────────────────────────────────────────────
+// Stores third-party OAuth identities linked to portal_users.
+// Designed for Google now; add Apple and others by inserting new provider values.
+// Unique constraint on (provider, provider_subject) prevents duplicate identities.
+export const userIdentities = pgTable("user_identities", {
+  id:              serial("id").primaryKey(),
+  userId:          integer("user_id").notNull().references(() => portalUsers.id, { onDelete: "cascade" }),
+  provider:        text("provider").notNull(),          // 'google' | 'apple'
+  providerSubject: text("provider_subject").notNull(),  // stable opaque ID from the provider
+  email:           text("email"),                       // email as reported by provider
+  createdAt:       timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:       timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("user_identities_provider_subject_idx").on(t.provider, t.providerSubject),
+]);
+export type UserIdentity = typeof userIdentities.$inferSelect;
