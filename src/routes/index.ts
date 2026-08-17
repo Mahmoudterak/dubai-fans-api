@@ -19,6 +19,8 @@ import adminWebsiteOrdersRouter from "./admin-website-orders";
 import businessAuditRouter from "./business-audit";
 import adminBusinessAuditsRouter from "./admin-business-audits";
 import demoRequestsRouter from "./demo-requests";
+import portalAdminExportRouter from "./portal-admin-export";
+import portalAdminAuthRouter from "./portal-admin-auth";
 
 const router: IRouter = Router();
 
@@ -41,6 +43,8 @@ router.use(adminWebsiteOrdersRouter);
 router.use(businessAuditRouter);
 router.use(adminBusinessAuditsRouter);
 router.use(demoRequestsRouter);
+router.use(portalAdminAuthRouter);
+router.use(portalAdminExportRouter);
 router.use(storageRouter);
 
 export default router;

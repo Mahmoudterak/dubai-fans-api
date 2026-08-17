@@ -127,6 +127,13 @@
       "when": 1785953576082,
       "tag": "0018_oval_strong_guy",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786957907305,
+      "tag": "0018_portal",
+      "breakpoints": true
     }
   ]
 }

@@ -16,3 +16,4 @@ export * from "./ai-business-os-leads";
 export * from "./website-orders";
 export * from "./business-audits";
 export * from "./demo-requests";
+export * from "./portal";

@@ -16,7 +16,7 @@
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:push": "drizzle-kit push --config drizzle.config.ts",
     "check-drift": "tsx src/vendor/db/check-schema-drift.ts",
-    "test": "vitest run"
+    "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.21.0",
