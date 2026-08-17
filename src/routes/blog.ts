@@ -19,6 +19,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { blogPosts, insertBlogPostSchema } from "@workspace/db/schema";
+import { requirePortalAdmin } from "../lib/portalAuth.js";
 import { eq, desc } from "drizzle-orm";
 import { rebuildSitemap } from "../lib/sitemap.js";
 import { logger } from "../lib/logger.js";
@@ -159,9 +160,8 @@ router.get("/blog/posts/:id", async (req: Request, res: Response): Promise<void>
 });
 
 // ── POST /api/admin/blog/posts — admin UI ──────────────────────────────────────
-// Protected by HttpOnly session cookie (not raw ADMIN_PASSWORD).
-router.post("/admin/blog/posts", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdminSession(req, res)) return;
+// Protected by portal_admin_session cookie.
+router.post("/admin/blog/posts", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
 
   const parsed = insertBlogPostSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -199,8 +199,7 @@ router.post("/admin/blog/posts", async (req: Request, res: Response): Promise<vo
 
 // ── PATCH /api/admin/blog/posts/:id — admin UI ────────────────────────────────
 // Update an existing post's content without changing its slug/id.
-router.patch("/admin/blog/posts/:id", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdminSession(req, res)) return;
+router.patch("/admin/blog/posts/:id", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
 
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -240,8 +239,7 @@ router.patch("/admin/blog/posts/:id", async (req: Request, res: Response): Promi
 });
 
 // ── DELETE /api/admin/blog/posts/:id — admin UI ────────────────────────────────
-router.delete("/admin/blog/posts/:id", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdminSession(req, res)) return;
+router.delete("/admin/blog/posts/:id", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
 
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

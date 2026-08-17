@@ -29,40 +29,15 @@ import { logger } from "../lib/logger.js";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { ObjectStorageService } from "../lib/objectStorage.js";
 import { sendReportPublishedEmail } from "../lib/mailer.js";
+import { requirePortalAdmin } from "../lib/portalAuth.js";
 
 const objectStorage = new ObjectStorageService();
 
 const router: IRouter = Router();
 const BCRYPT_ROUNDS = 10;
 
-// ── Admin session guard ────────────────────────────────────────────────────────
-import { createHmac, timingSafeEqual } from "crypto";
-
-const SESSION_COOKIE = "df_admin_session";
-const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-
-function validateAdminToken(token: string, adminPassword: string): boolean {
-  const dot = token.indexOf(".");
-  if (dot === -1) return false;
-  const expires = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  if (parseInt(expires, 16) < Date.now()) return false;
-  const expected = createHmac("sha256", adminPassword).update(expires).digest("hex");
-  try {
-    return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
-  } catch { return false; }
-}
-
-function checkAdmin(req: Request, res: Response): boolean {
-  const pwd = process.env.ADMIN_PASSWORD;
-  if (!pwd) { res.status(503).json({ error: "ADMIN_PASSWORD not configured" }); return false; }
-  const token: string | undefined = (req.cookies as Record<string, string>)?.[SESSION_COOKIE];
-  if (!token || !validateAdminToken(token, pwd)) {
-    res.status(401).json({ status: 401, error: "جلسة منتهية — يرجى تسجيل الدخول من جديد" });
-    return false;
-  }
-  return true;
-}
+// Every route in this file is admin-only.
+router.use(requirePortalAdmin);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function numId(req: Request): number | null {
@@ -77,7 +52,6 @@ function numId(req: Request): number | null {
 
 // GET /api/admin/clients
 router.get("/admin/clients", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
   try {
     const rows = await db.select().from(clients).orderBy(desc(clients.createdAt));
 
@@ -119,7 +93,6 @@ router.get("/admin/clients", async (req: Request, res: Response): Promise<void> 
 
 // POST /api/admin/clients
 router.post("/admin/clients", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
   const { slug, name, logoUrl, industry } = req.body as {
     slug?: string; name?: string; logoUrl?: string; industry?: string;
   };
@@ -147,7 +120,6 @@ router.post("/admin/clients", async (req: Request, res: Response): Promise<void>
 
 // GET /api/admin/clients/:id
 router.get("/admin/clients/:id", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const [client] = await db.select().from(clients).where(eq(clients.id, id));
@@ -157,7 +129,6 @@ router.get("/admin/clients/:id", async (req: Request, res: Response): Promise<vo
 
 // PATCH /api/admin/clients/:id
 router.patch("/admin/clients/:id", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const { name, logoUrl, industry } = req.body as { name?: string; logoUrl?: string; industry?: string };
@@ -173,7 +144,6 @@ router.patch("/admin/clients/:id", async (req: Request, res: Response): Promise<
 
 // DELETE /api/admin/clients/:id
 router.delete("/admin/clients/:id", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const [deleted] = await db.delete(clients).where(eq(clients.id, id)).returning({ id: clients.id });
@@ -207,7 +177,7 @@ function numUserId(req: Request): number | null {
 
 // GET /api/admin/clients/:id/users — list a client's users
 router.get("/admin/clients/:id/users", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.id, id));
@@ -223,7 +193,7 @@ router.get("/admin/clients/:id/users", async (req: Request, res: Response): Prom
 
 // POST /api/admin/clients/:id/users — create a user with a role
 router.post("/admin/clients/:id/users", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const { email, name, password, role } = req.body as {
@@ -263,7 +233,7 @@ router.post("/admin/clients/:id/users", async (req: Request, res: Response): Pro
 
 // PATCH /api/admin/clients/:id/users/:userId — role / activate-deactivate / reset password / name
 router.patch("/admin/clients/:id/users/:userId", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   const userId = numUserId(req);
   if (!id || !userId) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
@@ -311,7 +281,7 @@ router.patch("/admin/clients/:id/users/:userId", async (req: Request, res: Respo
 
 // DELETE /api/admin/clients/:id/users/:userId — delete a user
 router.delete("/admin/clients/:id/users/:userId", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   const userId = numUserId(req);
   if (!id || !userId) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
@@ -330,7 +300,7 @@ router.delete("/admin/clients/:id/users/:userId", async (req: Request, res: Resp
 
 // GET /api/admin/reports
 router.get("/admin/reports", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const clientIdFilter = req.query.clientId ? parseInt(req.query.clientId as string, 10) : null;
   try {
     const rows = clientIdFilter
@@ -345,7 +315,7 @@ router.get("/admin/reports", async (req: Request, res: Response): Promise<void> 
 
 // POST /api/admin/reports
 router.post("/admin/reports", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const { clientId, title, periodStart, periodEnd } = req.body as {
     clientId?: number; title?: string; periodStart?: string; periodEnd?: string;
   };
@@ -370,7 +340,7 @@ router.post("/admin/reports", async (req: Request, res: Response): Promise<void>
 
 // GET /api/admin/reports/:id
 router.get("/admin/reports/:id", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const [report] = await db.select().from(campaignReports).where(eq(campaignReports.id, id));
@@ -385,7 +355,7 @@ router.get("/admin/reports/:id", async (req: Request, res: Response): Promise<vo
 
 // PATCH /api/admin/reports/:id
 router.patch("/admin/reports/:id", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const { title, periodStart, periodEnd } = req.body as { title?: string; periodStart?: string; periodEnd?: string };
@@ -402,7 +372,7 @@ router.patch("/admin/reports/:id", async (req: Request, res: Response): Promise<
 
 // DELETE /api/admin/reports/:id
 router.delete("/admin/reports/:id", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const [deleted] = await db.delete(campaignReports).where(eq(campaignReports.id, id)).returning({ id: campaignReports.id });
@@ -412,7 +382,7 @@ router.delete("/admin/reports/:id", async (req: Request, res: Response): Promise
 
 // PUT /api/admin/reports/:id/data — upsert campaign_data rows
 router.put("/admin/reports/:id/data", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
 
@@ -466,7 +436,7 @@ router.put("/admin/reports/:id/data", async (req: Request, res: Response): Promi
 
 // PATCH /api/admin/reports/:id/publish
 router.patch("/admin/reports/:id/publish", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const { status } = req.body as { status?: "draft" | "published" };
@@ -544,7 +514,7 @@ router.post("/admin/reports/:id/notify", async (req: Request, res: Response): Pr
     res.status(403).json({ error: "طلب غير مصرّح به — مصدر غير موثوق" });
     return;
   }
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
 
@@ -630,7 +600,7 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 
 // POST /api/admin/reports/:id/upload-url — get a presigned PUT URL for one image
 router.post("/admin/reports/:id/upload-url", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
 
@@ -676,8 +646,6 @@ router.put(
   "/admin/upload-slot/:uuid",
   express.raw({ type: "*/*", limit: "11mb" }),
   async (req: Request, res: Response): Promise<void> => {
-    if (!checkAdmin(req, res)) return;
-
     const { uuid } = req.params as { uuid: string };
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(uuid)) {
@@ -713,7 +681,7 @@ router.put(
 
 // PATCH /api/admin/reports/:id/media — save mediaUrls array to report_content
 router.patch("/admin/reports/:id/media", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
   const { mediaUrls } = req.body as { mediaUrls?: string[] };
@@ -739,7 +707,7 @@ router.patch("/admin/reports/:id/media", async (req: Request, res: Response): Pr
 
 // DELETE /api/admin/reports/:id/media/:index — remove one image by index
 router.delete("/admin/reports/:id/media/:index", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   const rawIdx = Array.isArray(req.params.index) ? req.params.index[0] : req.params.index;
   const idx = parseInt(rawIdx, 10);
@@ -761,7 +729,7 @@ router.delete("/admin/reports/:id/media/:index", async (req: Request, res: Respo
 
 // POST /api/admin/reports/:id/generate
 router.post("/admin/reports/:id/generate", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdmin(req, res)) return;
+
   const id = numId(req);
   if (!id) { res.status(400).json({ error: "معرّف غير صالح" }); return; }
 

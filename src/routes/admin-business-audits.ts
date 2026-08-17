@@ -7,40 +7,11 @@
  *   GET   /api/admin/business-audits/:id   — full row including the AI report
  *   PATCH /api/admin/business-audits/:id   — update lead status
  */
-import { createHmac, timingSafeEqual } from "crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, businessAudits } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
-
-// ── Admin session helpers (mirrors admin-website-orders.ts) ──────────────────
-const SESSION_COOKIE = "df_admin_session";
-
-function validateToken(token: string, adminPassword: string): boolean {
-  const dot = token.indexOf(".");
-  if (dot === -1) return false;
-  const expires = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  if (parseInt(expires, 16) < Date.now()) return false;
-  const expected = createHmac("sha256", adminPassword).update(expires).digest("hex");
-  try {
-    return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
-  } catch { return false; }
-}
-
-function checkAdminSession(req: Request, res: Response): boolean {
-  const pwd = process.env.ADMIN_PASSWORD;
-  if (!pwd) {
-    res.status(503).json({ error: "ADMIN_PASSWORD not configured on the server" });
-    return false;
-  }
-  const token: string | undefined = (req.cookies as Record<string, string>)?.[SESSION_COOKIE];
-  if (!token || !validateToken(token, pwd)) {
-    res.status(401).json({ status: 401, error: "جلسة منتهية — يرجى تسجيل الدخول من جديد" });
-    return false;
-  }
-  return true;
-}
+import { requirePortalAdmin } from "../lib/portalAuth.js";
 
 function checkCsrf(req: Request, res: Response): boolean {
   if (req.headers["x-requested-with"] !== "fetch") {
@@ -55,8 +26,7 @@ const VALID_STATUSES = ["new", "contacted", "interested", "not_interested"] as c
 const router: IRouter = Router();
 
 // ── GET /api/admin/business-audits ────────────────────────────────────────────
-router.get("/admin/business-audits", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdminSession(req, res)) return;
+router.get("/admin/business-audits", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
     const audits = await db.select({
       id:           businessAudits.id,
@@ -79,8 +49,7 @@ router.get("/admin/business-audits", async (req: Request, res: Response): Promis
 });
 
 // ── GET /api/admin/business-audits/:id ────────────────────────────────────────
-router.get("/admin/business-audits/:id", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdminSession(req, res)) return;
+router.get("/admin/business-audits/:id", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isInteger(id) || id <= 0) {
@@ -100,9 +69,8 @@ router.get("/admin/business-audits/:id", async (req: Request, res: Response): Pr
 });
 
 // ── PATCH /api/admin/business-audits/:id ──────────────────────────────────────
-router.patch("/admin/business-audits/:id", async (req: Request, res: Response): Promise<void> => {
+router.patch("/admin/business-audits/:id", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
   if (!checkCsrf(req, res)) return;
-  if (!checkAdminSession(req, res)) return;
   try {
     const id = parseInt(String(req.params.id), 10);
     if (!Number.isInteger(id) || id <= 0) {

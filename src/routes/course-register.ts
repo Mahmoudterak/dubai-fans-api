@@ -1,38 +1,8 @@
-import { createHmac, timingSafeEqual } from "crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, courseEnrollments } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
-
-// ── Admin session helpers (mirrors blog.ts) ───────────────────────────────────
-const SESSION_COOKIE = "df_admin_session";
-const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
-
-function validateToken(token: string, adminPassword: string): boolean {
-  const dot = token.indexOf(".");
-  if (dot === -1) return false;
-  const expires = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  if (parseInt(expires, 16) < Date.now()) return false;
-  const expected = createHmac("sha256", adminPassword).update(expires).digest("hex");
-  try {
-    return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
-  } catch { return false; }
-}
-
-function checkAdminSession(req: Request, res: Response): boolean {
-  const pwd = process.env.ADMIN_PASSWORD;
-  if (!pwd) {
-    res.status(503).json({ error: "ADMIN_PASSWORD not configured on the server" });
-    return false;
-  }
-  const token: string | undefined = (req.cookies as Record<string, string>)?.[SESSION_COOKIE];
-  if (!token || !validateToken(token, pwd)) {
-    res.status(401).json({ status: 401, error: "جلسة منتهية — يرجى تسجيل الدخول من جديد" });
-    return false;
-  }
-  return true;
-}
+import { requirePortalAdmin } from "../lib/portalAuth.js";
 
 const router: IRouter = Router();
 
@@ -154,7 +124,7 @@ async function trySendEmail(reg: {
   </div>`;
 
   // ── Confirmation email to the student ──
-  const whatsappUrl = "https://wa.me/971551981564";
+  const whatsappUrl = "https://wa.me/971542861215";
   const studentHtml = `
   <div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#111827;">
     <div style="background:linear-gradient(135deg,#CC0000,#1E1B4B);padding:32px 24px;border-radius:12px 12px 0 0;text-align:center;">
@@ -273,13 +243,10 @@ router.post("/course-register", async (req, res): Promise<void> => {
 
     logger.info({ id: inserted.id, course: inserted.courseSlug, name: inserted.fullName }, "Course enrollment saved to DB");
 
-    // Use ctx.waitUntil (attached by the CF adapter) so the Resend HTTP fetch
-    // is not killed when the Worker response resolves.
-    (req as any).waitUntil?.(
-      trySendEmail(inserted).catch(err => {
-        logger.error({ err }, "Failed to send enrollment email");
-      }),
-    );
+    // Send email asynchronously — don't block the response
+    trySendEmail(inserted).catch(err => {
+      logger.error({ err }, "Failed to send enrollment email");
+    });
 
     res.json({ success: true, id: inserted.id });
   } catch (err) {
@@ -310,9 +277,8 @@ router.get("/course-register", async (req, res): Promise<void> => {
   }
 });
 
-// ── GET /api/admin/course-enrollments (session-cookie protected) ──────────────
-router.get("/admin/course-enrollments", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdminSession(req, res)) return;
+// ── GET /api/admin/course-enrollments (portal admin protected) ────────────────
+router.get("/admin/course-enrollments", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
 
   try {
     const list = await db
@@ -327,17 +293,16 @@ router.get("/admin/course-enrollments", async (req: Request, res: Response): Pro
   }
 });
 
-// ── PATCH /api/admin/course-enrollments/:id/link-student (session-cookie) ────
+// ── PATCH /api/admin/course-enrollments/:id/link-student (portal admin) ───────
 // Allows an admin to explicitly link (or unlink) an enrollment to a student
 // account. This is the only safe way to associate enrollments with students —
 // no automatic email-based linking is performed by the student auth routes.
-router.patch("/admin/course-enrollments/:id/link-student", async (req: Request, res: Response): Promise<void> => {
+router.patch("/admin/course-enrollments/:id/link-student", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
   // CSRF guard — cross-site HTML forms cannot set custom headers
   if (req.headers["x-requested-with"] !== "fetch") {
     res.status(403).json({ error: "طلب غير مصرّح به — مصدر غير موثوق" });
     return;
   }
-  if (!checkAdminSession(req, res)) return;
 
   const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(rawId ?? "", 10);
@@ -373,16 +338,15 @@ router.patch("/admin/course-enrollments/:id/link-student", async (req: Request, 
   }
 });
 
-// ── PATCH /api/admin/course-enrollments/:id (session-cookie protected) ────────
+// ── PATCH /api/admin/course-enrollments/:id (portal admin protected) ──────────
 const VALID_STATUSES = ["new", "contacted", "enrolled", "cancelled"] as const;
 
-router.patch("/admin/course-enrollments/:id", async (req: Request, res: Response): Promise<void> => {
+router.patch("/admin/course-enrollments/:id", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
   // CSRF guard — cross-site HTML forms cannot set custom headers
   if (req.headers["x-requested-with"] !== "fetch") {
     res.status(403).json({ error: "طلب غير مصرّح به — مصدر غير موثوق" });
     return;
   }
-  if (!checkAdminSession(req, res)) return;
 
   const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(rawId ?? "", 10);

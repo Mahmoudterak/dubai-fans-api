@@ -6,40 +6,11 @@
  *   GET   /api/admin/aibos-leads       — list all leads (newest first)
  *   PATCH /api/admin/aibos-leads/:id   — update lead follow-up status
  */
-import { createHmac, timingSafeEqual } from "crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, aibosLeads } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
-
-// ── Admin session helpers (mirrors course-register.ts) ────────────────────────
-const SESSION_COOKIE = "df_admin_session";
-
-function validateToken(token: string, adminPassword: string): boolean {
-  const dot = token.indexOf(".");
-  if (dot === -1) return false;
-  const expires = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  if (parseInt(expires, 16) < Date.now()) return false;
-  const expected = createHmac("sha256", adminPassword).update(expires).digest("hex");
-  try {
-    return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
-  } catch { return false; }
-}
-
-function checkAdminSession(req: Request, res: Response): boolean {
-  const pwd = process.env.ADMIN_PASSWORD;
-  if (!pwd) {
-    res.status(503).json({ error: "ADMIN_PASSWORD not configured on the server" });
-    return false;
-  }
-  const token: string | undefined = (req.cookies as Record<string, string>)?.[SESSION_COOKIE];
-  if (!token || !validateToken(token, pwd)) {
-    res.status(401).json({ status: 401, error: "جلسة منتهية — يرجى تسجيل الدخول من جديد" });
-    return false;
-  }
-  return true;
-}
+import { requirePortalAdmin } from "../lib/portalAuth.js";
 
 // CSRF guard: admin cookie uses SameSite=None, so state-changing routes must
 // require the X-Requested-With header (browsers can't attach it cross-site
@@ -55,8 +26,7 @@ function checkCsrf(req: Request, res: Response): boolean {
 const router: IRouter = Router();
 
 // ── GET /api/admin/aibos-leads ────────────────────────────────────────────────
-router.get("/admin/aibos-leads", async (req: Request, res: Response): Promise<void> => {
-  if (!checkAdminSession(req, res)) return;
+router.get("/admin/aibos-leads", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
 
   try {
     const list = await db
@@ -74,9 +44,8 @@ router.get("/admin/aibos-leads", async (req: Request, res: Response): Promise<vo
 // ── PATCH /api/admin/aibos-leads/:id ──────────────────────────────────────────
 export const VALID_LEAD_STATUSES = ["new", "contacted", "interested", "not_interested"] as const;
 
-router.patch("/admin/aibos-leads/:id", async (req: Request, res: Response): Promise<void> => {
+router.patch("/admin/aibos-leads/:id", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
   if (!checkCsrf(req, res)) return;
-  if (!checkAdminSession(req, res)) return;
 
   const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(rawId ?? "", 10);
