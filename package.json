@@ -22,6 +22,7 @@
     "migrate": "tsx src/vendor/db/migrate-cli.ts",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:push": "drizzle-kit push --config drizzle.config.ts",
+    "check-drift": "tsx src/vendor/db/check-schema-drift.ts",
     "test": "vitest run"
   },
   "dependencies": {
