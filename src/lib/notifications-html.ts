@@ -90,7 +90,7 @@ export const NOTIFICATIONS_HTML = `<!DOCTYPE html>
       margin: 1.4rem 0;
     }
 
-    button[type="submit"] {
+    button[type="submit"], .logout-btn {
       width: 100%;
       background: #6366f1;
       color: #fff;
@@ -103,13 +103,20 @@ export const NOTIFICATIONS_HTML = `<!DOCTYPE html>
       transition: background .2s, transform .1s;
       font-family: inherit;
     }
-    button[type="submit"]:hover { background: #4f46e5; }
-    button[type="submit"]:active { transform: scale(.98); }
+    button[type="submit"]:hover, .logout-btn:hover { background: #4f46e5; }
+    button[type="submit"]:active, .logout-btn:active { transform: scale(.98); }
     button[type="submit"]:disabled {
       background: #334155;
       color: #64748b;
       cursor: not-allowed;
     }
+    .logout-btn {
+      background: #334155;
+      font-size: .85rem;
+      padding: .5rem;
+      margin-top: .75rem;
+    }
+    .logout-btn:hover { background: #475569; }
 
     #result {
       margin-top: 1.1rem;
@@ -155,6 +162,9 @@ export const NOTIFICATIONS_HTML = `<!DOCTYPE html>
       color: #64748b;
       margin-top: .15rem;
     }
+
+    #login-section, #dashboard-section { display: none; }
+    #login-section.active, #dashboard-section.active { display: block; }
   </style>
 </head>
 <body>
@@ -164,56 +174,74 @@ export const NOTIFICATIONS_HTML = `<!DOCTYPE html>
     <p>إرسال إشعار فوري لجميع أجهزة دبي فانز</p>
   </div>
 
-  <!-- Stats row (loaded on page open) -->
-  <div class="stats-bar">
-    <div class="stat">
-      <div class="num" id="stat-devices">—</div>
-      <div class="lbl">جهاز مسجّل</div>
-    </div>
+  <!-- ── Login section ──────────────────────────────────────────────────────── -->
+  <div id="login-section">
+    <form id="login-form" autocomplete="off">
+      <div class="field">
+        <label for="email">البريد الإلكتروني</label>
+        <input type="email" id="email" name="email" placeholder="admin@example.com" required autofocus />
+      </div>
+      <div class="field">
+        <label for="password">كلمة المرور</label>
+        <input type="password" id="password" name="password" placeholder="••••••••" required />
+      </div>
+      <div id="login-error" style="color:#fca5a5;font-size:.85rem;margin-bottom:.75rem;display:none;"></div>
+      <button type="submit" id="login-btn">دخول</button>
+    </form>
   </div>
 
-  <form id="notif-form" autocomplete="off">
-    <div class="field">
-      <label for="password">كلمة مرور المدير</label>
-      <input type="password" id="password" name="password" placeholder="••••••••" required />
+  <!-- ── Dashboard section (shown after login) ─────────────────────────────── -->
+  <div id="dashboard-section">
+    <!-- Stats row -->
+    <div class="stats-bar">
+      <div class="stat">
+        <div class="num" id="stat-devices">—</div>
+        <div class="lbl">جهاز مسجّل</div>
+      </div>
     </div>
 
-    <hr class="divider" />
+    <form id="notif-form" autocomplete="off">
+      <div class="field">
+        <label for="title">عنوان الإشعار</label>
+        <input type="text" id="title" name="title" placeholder="مثال: عرض خاص اليوم فقط!" maxlength="100" required />
+      </div>
 
-    <div class="field">
-      <label for="title">عنوان الإشعار</label>
-      <input type="text" id="title" name="title" placeholder="مثال: عرض خاص اليوم فقط!" maxlength="100" required />
-    </div>
+      <div class="field">
+        <label for="body">نص الإشعار</label>
+        <textarea id="body" name="body" placeholder="اكتب محتوى الإشعار هنا…" maxlength="250" required></textarea>
+      </div>
 
-    <div class="field">
-      <label for="body">نص الإشعار</label>
-      <textarea id="body" name="body" placeholder="اكتب محتوى الإشعار هنا…" maxlength="250" required></textarea>
-    </div>
+      <div class="field">
+        <label for="screen">الشاشة الوجهة</label>
+        <select id="screen" name="screen">
+          <option value="">— بدون توجيه —</option>
+          <option value="pricing">صفحة الأسعار</option>
+          <option value="services">صفحة الخدمات</option>
+          <option value="analyze">صفحة التحليل</option>
+        </select>
+      </div>
 
-    <div class="field">
-      <label for="screen">الشاشة الوجهة</label>
-      <select id="screen" name="screen">
-        <option value="">— بدون توجيه —</option>
-        <option value="pricing">صفحة الأسعار</option>
-        <option value="services">صفحة الخدمات</option>
-        <option value="analyze">صفحة التحليل</option>
-      </select>
-    </div>
+      <button type="submit" id="send-btn">إرسال الإشعار</button>
+    </form>
 
-    <button type="submit" id="send-btn">إرسال الإشعار</button>
-  </form>
-
-  <div id="result"></div>
+    <div id="result"></div>
+    <button class="logout-btn" id="logout-btn">تسجيل الخروج</button>
+  </div>
 </div>
 
 <script>
   const API_BASE = window.location.origin;
 
-  // ── Load device count on page load ──────────────────────────────────────────
-  async function loadStats(password) {
+  const loginSection     = document.getElementById("login-section");
+  const dashboardSection = document.getElementById("dashboard-section");
+
+  function showLogin()     { loginSection.classList.add("active");    dashboardSection.classList.remove("active"); }
+  function showDashboard() { dashboardSection.classList.add("active"); loginSection.classList.remove("active"); }
+
+  // ── Load device count ────────────────────────────────────────────────────────
+  async function loadStats() {
     try {
-      const headers = password ? { "x-admin-secret": password } : {};
-      const res = await fetch(\`\${API_BASE}/api/notifications/stats\`, { headers });
+      const res = await fetch(\`\${API_BASE}/api/notifications/stats\`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         document.getElementById("stat-devices").textContent = data.registeredDevices ?? "—";
@@ -221,17 +249,76 @@ export const NOTIFICATIONS_HTML = `<!DOCTYPE html>
     } catch { /* silent */ }
   }
 
-  // Attempt initial load without a password (server may have no ADMIN_SECRET set)
-  loadStats("");
+  // ── Check existing session on page load ──────────────────────────────────────
+  (async () => {
+    try {
+      const res = await fetch(\`\${API_BASE}/api/portal/admin/auth/me\`, { credentials: "include" });
+      if (res.ok) {
+        showDashboard();
+        await loadStats();
+      } else {
+        showLogin();
+      }
+    } catch {
+      showLogin();
+    }
+  })();
 
-  // ── Send form ────────────────────────────────────────────────────────────────
+  // ── Login form ───────────────────────────────────────────────────────────────
+  document.getElementById("login-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const loginError = document.getElementById("login-error");
+    const loginBtn   = document.getElementById("login-btn");
+    const email      = document.getElementById("email").value.trim();
+    const password   = document.getElementById("password").value;
+
+    loginError.style.display = "none";
+    loginBtn.disabled = true;
+    loginBtn.textContent = "جارٍ التحقق…";
+
+    try {
+      const res = await fetch(\`\${API_BASE}/api/portal/admin/auth/login\`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (res.ok) {
+        showDashboard();
+        await loadStats();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        loginError.textContent = data?.error?.message || "البريد الإلكتروني أو كلمة المرور غير صحيحة";
+        loginError.style.display = "block";
+      }
+    } catch (err) {
+      loginError.textContent = \`تعذّر الاتصال بالخادم: \${err.message}\`;
+      loginError.style.display = "block";
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = "دخول";
+    }
+  });
+
+  // ── Logout ───────────────────────────────────────────────────────────────────
+  document.getElementById("logout-btn").addEventListener("click", async () => {
+    await fetch(\`\${API_BASE}/api/portal/admin/auth/logout\`, {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => {});
+    showLogin();
+    document.getElementById("email").value    = "";
+    document.getElementById("password").value = "";
+  });
+
+  // ── Send notification form ───────────────────────────────────────────────────
   document.getElementById("notif-form").addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const password = document.getElementById("password").value.trim();
-    const title    = document.getElementById("title").value.trim();
-    const body     = document.getElementById("body").value.trim();
-    const screen   = document.getElementById("screen").value;
+    const title  = document.getElementById("title").value.trim();
+    const body   = document.getElementById("body").value.trim();
+    const screen = document.getElementById("screen").value;
 
     const btn    = document.getElementById("send-btn");
     const result = document.getElementById("result");
@@ -241,21 +328,21 @@ export const NOTIFICATIONS_HTML = `<!DOCTYPE html>
     result.className = "";
     result.style.display = "none";
 
-    // Refresh stats with the entered password
-    await loadStats(password);
-
     const payload = { title, body };
     if (screen) payload.data = { screen };
 
     try {
       const res = await fetch(\`\${API_BASE}/api/notifications/send\`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-secret": password,
-        },
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
+
+      if (res.status === 401 || res.status === 403) {
+        showLogin();
+        return;
+      }
 
       const data = await res.json();
 
@@ -272,8 +359,7 @@ export const NOTIFICATIONS_HTML = `<!DOCTYPE html>
           \`📱 وصل إلى <strong>\${data.sent}</strong> جهاز\` +
           (data.failed ? \` — فشل في <strong>\${data.failed}</strong>\` : "") +
           \` من أصل <strong>\${data.total}</strong> مسجّل.\`;
-        // Refresh displayed stats
-        await loadStats(password);
+        await loadStats();
       }
     } catch (err) {
       result.className = "error";

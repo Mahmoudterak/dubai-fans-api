@@ -4,6 +4,7 @@ import { logger } from "./lib/logger";
 import { initSitemap } from "./lib/sitemap";
 import { scheduleResetTokenCleanup } from "./routes/company-auth";
 import { scheduleAibosCleanup } from "./lib/aibos-cleanup";
+import { bootstrapPortalAdmin } from "./lib/bootstrapPortalAdmin.js";
 
 const rawPort = process.env["PORT"];
 
@@ -26,6 +27,10 @@ try {
   logger.error({ err }, "Database migration failed — refusing to start");
   process.exit(1);
 }
+
+// Seed the initial portal super-admin if portal_admin_users is empty.
+// Idempotent: no-op when at least one admin row already exists.
+await bootstrapPortalAdmin();
 
 app.listen(port, (err) => {
   if (err) {

@@ -118,7 +118,7 @@ async function trySendEmail(reg: {
         ✅ تم حفظ الطلب في قاعدة البيانات بتاريخ ${reg.createdAt.toLocaleString("ar-AE")}
       </div>
       <div style="margin-top:12px;padding:12px;background:#EFF6FF;border-radius:8px;font-size:12px;color:#1E40AF;">
-        🔗 لمراجعة جميع الطلبات: GET /api/course-register (مع رأس x-admin-secret)
+        🔗 لمراجعة جميع الطلبات: GET /api/admin/course-enrollments (يتطلب جلسة مشرف)
       </div>
     </div>
   </div>`;
@@ -252,28 +252,6 @@ router.post("/course-register", async (req, res): Promise<void> => {
   } catch (err) {
     logger.error({ err }, "Failed to save course enrollment");
     res.status(500).json({ error: "حدث خطأ في الحفظ، يرجى المحاولة مجدداً." });
-  }
-});
-
-// ── GET /api/course-register (legacy — x-admin-secret header) ────────────────
-router.get("/course-register", async (req, res): Promise<void> => {
-  const adminSecret = process.env.ADMIN_PASSWORD;
-  const provided    = req.headers["x-admin-secret"];
-  if (adminSecret && provided !== adminSecret) {
-    res.status(401).json({ error: "غير مصرح" });
-    return;
-  }
-
-  try {
-    const list = await db
-      .select()
-      .from(courseEnrollments)
-      .orderBy(desc(courseEnrollments.createdAt));
-
-    res.json({ count: list.length, enrollments: list });
-  } catch (err) {
-    logger.error({ err }, "Failed to fetch enrollments");
-    res.status(500).json({ error: "خطأ في جلب البيانات" });
   }
 });
 

@@ -104,18 +104,33 @@ vi.mock("@workspace/integrations-openai-ai-server", () => ({
   },
 }));
 
+// Mock fs so notifications.ts does not read/write real files during tests
+vi.mock("fs", () => ({
+  default: {
+    existsSync: vi.fn().mockReturnValue(false),
+    mkdirSync:  vi.fn(),
+    readFileSync: vi.fn().mockReturnValue("[]"),
+    writeFileSync: vi.fn(),
+  },
+  existsSync: vi.fn().mockReturnValue(false),
+  mkdirSync:  vi.fn(),
+  readFileSync: vi.fn().mockReturnValue("[]"),
+  writeFileSync: vi.fn(),
+}));
+
 // ── Real imports (after mocks are registered) ──────────────────────────────────
 import {
   issueAdminToken,
   PORTAL_ADMIN_SESSION_COOKIE,
 } from "../../lib/portalAuth.js";
 
-import blogRouter       from "../blog.js";
-import clientsRouter    from "../admin-clients.js";
-import aibosRouter      from "../admin-aibos-leads.js";
-import auditsRouter     from "../admin-business-audits.js";
-import ordersRouter     from "../admin-website-orders.js";
-import courseRouter     from "../course-register.js";
+import blogRouter          from "../blog.js";
+import clientsRouter       from "../admin-clients.js";
+import aibosRouter         from "../admin-aibos-leads.js";
+import auditsRouter        from "../admin-business-audits.js";
+import ordersRouter        from "../admin-website-orders.js";
+import courseRouter        from "../course-register.js";
+import notificationsRouter from "../notifications.js";
 
 // ── Test helpers ───────────────────────────────────────────────────────────────
 
@@ -421,5 +436,99 @@ describe("blog.ts › DELETE /api/admin/blog/posts/:id — stale sessionVersion"
 
     expect(res.status).toBe(401);
     expect(res.body).toMatchObject({ success: false, error: { code: "SESSION_INVALIDATED" } });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// notifications.ts — POST /api/notifications/send
+// ══════════════════════════════════════════════════════════════════════════════
+describe("notifications.ts › POST /api/notifications/send", () => {
+  const app = buildApp(notificationsRouter);
+
+  it("rejects request with no cookie → 401", async () => {
+    const res = await request(app)
+      .post("/api/notifications/send")
+      .send({ title: "Test", body: "Hello" });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects request with old df_admin_session cookie → 401", async () => {
+    const res = await request(app)
+      .post("/api/notifications/send")
+      .set("Cookie", OLD_SESSION_COOKIE)
+      .send({ title: "Test", body: "Hello" });
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects request with x-admin-secret header instead of session → 401", async () => {
+    const res = await request(app)
+      .post("/api/notifications/send")
+      .set("x-admin-secret", process.env.ADMIN_PASSWORD ?? "test-admin-password")
+      .send({ title: "Test", body: "Hello" });
+    expect(res.status).toBe(401);
+  });
+
+  it("admits request with valid portal_admin_session cookie → not 401/403", async () => {
+    const res = await request(app)
+      .post("/api/notifications/send")
+      .set("Cookie", validPortalAdminCookie())
+      .send({ title: "Test", body: "Hello" });
+    // Auth passes; no registered devices → 200 with sent: 0
+    expect(res.status).not.toBe(401);
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBeLessThan(500);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// notifications.ts — GET /api/notifications/stats
+// ══════════════════════════════════════════════════════════════════════════════
+describe("notifications.ts › GET /api/notifications/stats", () => {
+  const app = buildApp(notificationsRouter);
+
+  it("rejects request with no cookie → 401", async () => {
+    const res = await request(app).get("/api/notifications/stats");
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects request with old df_admin_session cookie → 401", async () => {
+    const res = await request(app)
+      .get("/api/notifications/stats")
+      .set("Cookie", OLD_SESSION_COOKIE);
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects request with x-admin-secret header instead of session → 401", async () => {
+    const res = await request(app)
+      .get("/api/notifications/stats")
+      .set("x-admin-secret", process.env.ADMIN_PASSWORD ?? "test-admin-password");
+    expect(res.status).toBe(401);
+  });
+
+  it("admits request with valid portal_admin_session cookie → 200", async () => {
+    const res = await request(app)
+      .get("/api/notifications/stats")
+      .set("Cookie", validPortalAdminCookie());
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("registeredDevices");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// course-register.ts — GET /api/course-register (retired, must return 404)
+// ══════════════════════════════════════════════════════════════════════════════
+describe("course-register.ts › GET /api/course-register (legacy — must be gone)", () => {
+  const app = buildApp(courseRouter);
+
+  it("returns 404 — the legacy x-admin-secret route no longer exists", async () => {
+    const res = await request(app)
+      .get("/api/course-register")
+      .set("x-admin-secret", process.env.ADMIN_PASSWORD ?? "test-admin-password");
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 even without any auth header", async () => {
+    const res = await request(app).get("/api/course-register");
+    expect(res.status).toBe(404);
   });
 });

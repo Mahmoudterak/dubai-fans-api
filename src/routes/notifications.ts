@@ -1,6 +1,7 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import fs from "fs";
 import path from "path";
+import { requirePortalAdmin } from "../lib/portalAuth.js";
 
 const router: IRouter = Router();
 
@@ -24,7 +25,7 @@ function saveTokens(tokens: string[]): void {
 }
 
 // ── POST /api/notifications/register ─────────────────────────────────────────
-router.post("/notifications/register", (req, res): void => {
+router.post("/notifications/register", (req: Request, res: Response): void => {
   const { token } = req.body as { token?: string };
   if (!token || typeof token !== "string" || !token.startsWith("ExponentPushToken")) {
     res.status(400).json({ error: "رمز الإشعار غير صالح" });
@@ -39,16 +40,8 @@ router.post("/notifications/register", (req, res): void => {
 });
 
 // ── POST /api/notifications/send ──────────────────────────────────────────────
-// Protected by ADMIN_PASSWORD header
-router.post("/notifications/send", async (req, res): Promise<void> => {
-  const adminSecret = process.env.ADMIN_PASSWORD;
-  const provided = req.headers["x-admin-secret"];
-
-  if (adminSecret && provided !== adminSecret) {
-    res.status(401).json({ error: "غير مصرح" });
-    return;
-  }
-
+// Protected by portal admin session (requirePortalAdmin).
+router.post("/notifications/send", requirePortalAdmin, async (req: Request, res: Response): Promise<void> => {
   const { title, body, data } = req.body as {
     title?: string;
     body?: string;
@@ -95,8 +88,7 @@ router.post("/notifications/send", async (req, res): Promise<void> => {
       const statuses = Array.isArray(result.data) ? result.data : [];
       sent += statuses.filter((s) => s.status === "ok").length;
       failed += statuses.filter((s) => s.status !== "ok").length;
-    } catch (err) {
-      req.log.error({ err }, "Expo Push API error");
+    } catch {
       failed += chunk.length;
     }
   }
@@ -105,13 +97,8 @@ router.post("/notifications/send", async (req, res): Promise<void> => {
 });
 
 // ── GET /api/notifications/stats ──────────────────────────────────────────────
-router.get("/notifications/stats", (req, res): void => {
-  const adminSecret = process.env.ADMIN_PASSWORD;
-  const provided = req.headers["x-admin-secret"];
-  if (adminSecret && provided !== adminSecret) {
-    res.status(401).json({ error: "غير مصرح" });
-    return;
-  }
+// Protected by portal admin session (requirePortalAdmin).
+router.get("/notifications/stats", requirePortalAdmin, (req: Request, res: Response): void => {
   const tokens = loadTokens();
   res.json({ registeredDevices: tokens.length });
 });
