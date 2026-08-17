@@ -36,9 +36,22 @@ jobs:
         working-directory: artifacts/dubai-fans-mobile
         run: eas build --platform android --profile production --non-interactive
 
-      - name: Submit to Google Play
-        working-directory: artifacts/dubai-fans-mobile
-        if: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY_JSON != '' }}
+      - name: Write Google service account key
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY_JSON }}
-        run: eas submit --platform android --profile production --non-interactive --latest
+        run: |
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_KEY_JSON" ]; then
+            echo "::error::GOOGLE_SERVICE_ACCOUNT_KEY_JSON secret is not set. Add it in GitHub repo Settings → Secrets and Variables → Actions."
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICE_ACCOUNT_KEY_JSON" > /tmp/google-service-account.json
+
+      - name: Submit to Google Play
+        working-directory: artifacts/dubai-fans-mobile
+        run: >
+          eas submit
+          --platform android
+          --profile production
+          --non-interactive
+          --latest
+          --service-account-key-path /tmp/google-service-account.json
