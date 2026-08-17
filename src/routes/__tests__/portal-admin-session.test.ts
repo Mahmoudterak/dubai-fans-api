@@ -515,6 +515,34 @@ describe("notifications.ts › GET /api/notifications/stats", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// blog.ts — retired credential endpoints must return 404
+//
+// POST /api/admin/verify, GET /api/admin/session, and POST /api/admin/logout
+// were removed from blog.ts when it switched to portal_admin_session.
+// These tests ensure they can never be accidentally re-added.
+// ══════════════════════════════════════════════════════════════════════════════
+describe("blog.ts › retired credential endpoints must not exist", () => {
+  const app = buildApp(blogRouter);
+
+  it("POST /api/admin/verify → 404 (endpoint retired)", async () => {
+    const res = await request(app)
+      .post("/api/admin/verify")
+      .send({ password: "any-password" });
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /api/admin/session → 404 (endpoint retired)", async () => {
+    const res = await request(app).get("/api/admin/session");
+    expect(res.status).toBe(404);
+  });
+
+  it("POST /api/admin/logout → 404 (endpoint retired)", async () => {
+    const res = await request(app).post("/api/admin/logout");
+    expect(res.status).toBe(404);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // course-register.ts — GET /api/course-register (retired, must return 404)
 // ══════════════════════════════════════════════════════════════════════════════
 describe("course-register.ts › GET /api/course-register (legacy — must be gone)", () => {
