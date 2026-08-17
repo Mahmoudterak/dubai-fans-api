@@ -209,17 +209,25 @@ router.post("/payments/ziina/webhook",
         // Already settled — idempotent
         if (payment.status === "completed") return;
 
-        // ── Currency validation ───────────────────────────────────────────
-        // Both the provider-reported currency and the internal payment currency
-        // must equal PORTAL_PAYMENT_CURRENCY ("AED"). Mismatch blocks settlement.
-        const providerCurrency = String(
-          event.currency_code ?? event.currency ?? event.data?.currency_code ?? ""
-        ).toUpperCase();
-        const internalCurrency = (payment.currency ?? "").toUpperCase();
+        // ── Currency validation (fail-closed) ────────────────────────────
+        // Only event.currency_code is the confirmed Ziina webhook field.
+        // Missing, empty, whitespace, or non-AED currency ALL block settlement.
+        const rawProviderCurrency = event.currency_code;
+        const providerCurrency = typeof rawProviderCurrency === "string"
+          ? rawProviderCurrency.trim().toUpperCase()
+          : null;   // null ← absent; always blocks
+
+        const rawInternalCurrency = payment.currency;
+        const internalCurrency = typeof rawInternalCurrency === "string"
+          ? rawInternalCurrency.trim().toUpperCase()
+          : null;
 
         if (
-          (providerCurrency !== "" && providerCurrency !== PORTAL_PAYMENT_CURRENCY) ||
-          internalCurrency !== PORTAL_PAYMENT_CURRENCY
+          providerCurrency === null ||
+          providerCurrency === "" ||
+          providerCurrency !== PORTAL_PAYMENT_CURRENCY ||
+          internalCurrency !== PORTAL_PAYMENT_CURRENCY ||
+          providerCurrency !== internalCurrency
         ) {
           await tx.update(portalPayments)
             .set({

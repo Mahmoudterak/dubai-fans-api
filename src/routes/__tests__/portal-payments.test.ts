@@ -189,9 +189,11 @@ beforeEach(() => {
 
 afterEach(() => { vi.resetAllMocks(); });
 
-// ── Helper: send a signed webhook ────────────────────────────────────────────
+// ── Helper: send a valid signed webhook (includes currency_code: "AED") ──────
+// A real Ziina webhook always includes currency_code. Tests that need to
+// omit or alter it use sendWebhookWithCurrency() inside the currency suite.
 async function sendWebhook(piId: string, type = "payment.completed") {
-  const body = webhookBody(piId, type);
+  const body = webhookBody(piId, type, { currency_code: "AED" });
   const sig  = makeWebhookSig(body);
   return request(app)
     .post("/api/payments/ziina/webhook")
@@ -694,9 +696,19 @@ describe("Currency validation — payment creation", () => {
 
 describe("Currency validation — webhook settlement (Invariant C2, C3, C4)", () => {
 
-  // Helper: send signed webhook with an optional currency_code in the body
-  async function sendWebhookWithCurrency(piId: string, currencyCode?: string, type = "payment.completed") {
-    const extra = currencyCode !== undefined ? { currency_code: currencyCode } : {};
+  /**
+   * Send a signed Ziina webhook.
+   * - currencyCode = string  → includes { currency_code: <value> }
+   * - currencyCode = null    → includes { currency_code: null }
+   * - currencyCode = ABSENT  (call with no 2nd arg or pass the sentinel) → omits currency_code entirely
+   */
+  const ABSENT = Symbol("ABSENT");
+  async function sendWebhookWithCurrency(
+    piId: string,
+    currencyCode: string | null | typeof ABSENT = ABSENT,
+    type = "payment.completed",
+  ) {
+    const extra = currencyCode === ABSENT ? {} : { currency_code: currencyCode };
     const body  = webhookBody(piId, type, extra);
     const sig   = makeWebhookSig(body);
     return request(app)
@@ -750,6 +762,80 @@ describe("Currency validation — webhook settlement (Invariant C2, C3, C4)", ()
 
     expect(res.status).toBe(200);
     expect(mockDb.insert).not.toHaveBeenCalled();       // no wallet transaction
+    expect(setPayloads.length).toBeGreaterThan(0);
+    const statuses = setPayloads.map((p: any) => p.status);
+    expect(statuses).toContain("failed");
+    expect(statuses).not.toContain("completed");
+    expect(statuses).not.toContain("processing");
+    const reasons = setPayloads.map((p: any) => p.failureReason ?? "").filter(Boolean);
+    expect(reasons.some((r: string) => r.includes("CURRENCY_MISMATCH"))).toBe(true);
+  });
+
+  // ── Missing / absent / empty / whitespace currency_code ──────────────────
+
+  it("C2d: currency_code absent (field not sent) → settlement blocked; wallet NOT credited", async () => {
+    const setPayloads: unknown[] = [];
+    mockDb.select.mockReturnValueOnce(makeChain([PENDING_PMT]));
+    mockDb.update.mockReturnValue(makeUpdateChain([], setPayloads));
+
+    const res = await sendWebhookWithCurrency("pi_test_1", ABSENT); // no currency_code field
+
+    expect(res.status).toBe(200);
+    expect(mockDb.insert).not.toHaveBeenCalled();     // no wallet transaction
+    expect(setPayloads.length).toBeGreaterThan(0);
+    const statuses = setPayloads.map((p: any) => p.status);
+    expect(statuses).toContain("failed");
+    expect(statuses).not.toContain("completed");
+    expect(statuses).not.toContain("processing");
+    const reasons = setPayloads.map((p: any) => p.failureReason ?? "").filter(Boolean);
+    expect(reasons.some((r: string) => r.includes("CURRENCY_MISMATCH"))).toBe(true);
+  });
+
+  it("C2e: currency_code = null → settlement blocked; wallet NOT credited", async () => {
+    const setPayloads: unknown[] = [];
+    mockDb.select.mockReturnValueOnce(makeChain([PENDING_PMT]));
+    mockDb.update.mockReturnValue(makeUpdateChain([], setPayloads));
+
+    const res = await sendWebhookWithCurrency("pi_test_1", null); // null explicitly sent
+
+    expect(res.status).toBe(200);
+    expect(mockDb.insert).not.toHaveBeenCalled();
+    expect(setPayloads.length).toBeGreaterThan(0);
+    const statuses = setPayloads.map((p: any) => p.status);
+    expect(statuses).toContain("failed");
+    expect(statuses).not.toContain("completed");
+    expect(statuses).not.toContain("processing");
+    const reasons = setPayloads.map((p: any) => p.failureReason ?? "").filter(Boolean);
+    expect(reasons.some((r: string) => r.includes("CURRENCY_MISMATCH"))).toBe(true);
+  });
+
+  it("C2f: currency_code = '' (empty string) → settlement blocked; wallet NOT credited", async () => {
+    const setPayloads: unknown[] = [];
+    mockDb.select.mockReturnValueOnce(makeChain([PENDING_PMT]));
+    mockDb.update.mockReturnValue(makeUpdateChain([], setPayloads));
+
+    const res = await sendWebhookWithCurrency("pi_test_1", "");
+
+    expect(res.status).toBe(200);
+    expect(mockDb.insert).not.toHaveBeenCalled();
+    expect(setPayloads.length).toBeGreaterThan(0);
+    const statuses = setPayloads.map((p: any) => p.status);
+    expect(statuses).toContain("failed");
+    expect(statuses).not.toContain("completed");
+    expect(statuses).not.toContain("processing");
+    const reasons = setPayloads.map((p: any) => p.failureReason ?? "").filter(Boolean);
+    expect(reasons.some((r: string) => r.includes("CURRENCY_MISMATCH"))).toBe(true);
+  });
+
+  it("C2g: currency_code = whitespace only → settlement blocked; wallet NOT credited", async () => {
+    const setPayloads: unknown[] = [];
+    mockDb.select.mockReturnValueOnce(makeChain([PENDING_PMT]));
+    mockDb.update.mockReturnValue(makeUpdateChain([], setPayloads));
+
+    const res = await sendWebhookWithCurrency("pi_test_1", "   ");
+
+    expect(res.status).toBe(200);
+    expect(mockDb.insert).not.toHaveBeenCalled();
     expect(setPayloads.length).toBeGreaterThan(0);
     const statuses = setPayloads.map((p: any) => p.status);
     expect(statuses).toContain("failed");
