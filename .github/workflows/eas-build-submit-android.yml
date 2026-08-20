@@ -1,0 +1,57 @@
+name: EAS Build & Submit Android
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-submit:
+    name: Build and Submit Android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: artifacts/dubai-fans-mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: artifacts/dubai-fans-mobile
+        run: npm ci
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android (production)
+        working-directory: artifacts/dubai-fans-mobile
+        run: eas build --platform android --profile production --non-interactive
+
+      - name: Write Google service account key
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_KEY_JSON" ]; then
+            echo "::error::GOOGLE_SERVICE_ACCOUNT_KEY_JSON secret is not set. Add it in GitHub repo Settings → Secrets and Variables → Actions."
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICE_ACCOUNT_KEY_JSON" > /tmp/google-service-account.json
+
+      - name: Submit to Google Play
+        working-directory: artifacts/dubai-fans-mobile
+        run: >
+          eas submit
+          --platform android
+          --profile production
+          --non-interactive
+          --latest
+          --service-account-key-path /tmp/google-service-account.json
