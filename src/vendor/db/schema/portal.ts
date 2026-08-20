@@ -14,6 +14,10 @@ export const portalOrderStatusEnum = pgEnum("portal_order_status", [
   "in_progress", "waiting_approval", "active", "completed", "cancelled",
 ]);
 
+export const portalOrderSourceEnum = pgEnum("portal_order_source", [
+  "website", "mobile_app",
+]);
+
 export const portalWalletTxTypeEnum = pgEnum("portal_wallet_tx_type", [
   "credit", "debit", "refund", "adjustment",
 ]);
@@ -153,6 +157,7 @@ export const portalOrders = pgTable("portal_orders", {
   serviceId:     integer("service_id").references(() => portalServices.id),
   packageId:     integer("package_id").references(() => portalPackages.id),
   status:        portalOrderStatusEnum("status").notNull().default("new"),
+  source:        portalOrderSourceEnum("source").notNull().default("website"),
   subtotal:      numeric("subtotal", { precision: 12, scale: 2 }).notNull(),
   vatRate:       numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0.00"),
   vatAmount:     numeric("vat_amount", { precision: 12, scale: 2 }).notNull().default("0.00"),

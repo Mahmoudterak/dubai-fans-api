@@ -6,7 +6,7 @@
 import bcrypt from "bcryptjs";
 import { Router, type Request, type Response } from "express";
 import { z } from "zod/v4";
-import { eq, desc, asc, and, sql, ne } from "drizzle-orm";
+import { eq, desc, asc, and, sql, ne, or, ilike, type SQL } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   portalUsers, portalProfiles, portalOrders, portalOrderTimeline,
@@ -14,7 +14,7 @@ import {
   portalTopupRequests, portalNotifications, portalSupportTickets,
   portalSupportMessages, portalServices, portalPackages,
   portalSettings, portalAuditLogs, portalAdminUsers,
-  portalFiles, portalCampaignReports,
+  portalFiles, portalCampaignReports, portalPayments,
 } from "../vendor/db/schema/portal.js";
 import {
   requirePortalAdmin, issueAdminToken, setAdminCookie,
@@ -40,6 +40,11 @@ function numId(req: Request, param = "id") {
   const n = parseInt(req.params[param], 10);
   return isNaN(n) ? null : n;
 }
+
+const ORDER_STATUSES = [
+  "new", "under_review", "waiting_customer", "ready_to_start",
+  "in_progress", "waiting_approval", "active", "completed", "cancelled",
+] as const;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AUTH
@@ -94,7 +99,9 @@ router.get("/portal/admin/stats", requirePortalAdmin, async (_req: Request, res:
   try {
     const [
       [{ totalCustomers }], [{ activeOrders }], [{ pendingTopups }],
-      [{ totalWallet }], [{ newCustomers }],
+      [{ totalWallet }], [{ newCustomers }], [{ mobileOrdersTotal }],
+      [{ mobileOrdersNew }], [{ mobileOrdersInProgress }], [{ mobileOrdersCompleted }],
+      [{ mobileOrdersValue }],
     ] = await Promise.all([
       db.select({ totalCustomers: sql<number>`count(*)::int` }).from(portalUsers),
       db.select({ activeOrders: sql<number>`count(*)::int` }).from(portalOrders)
@@ -104,8 +111,25 @@ router.get("/portal/admin/stats", requirePortalAdmin, async (_req: Request, res:
       db.select({ totalWallet: sql<string>`coalesce(sum(balance)::text,'0')` }).from(portalWallets),
       db.select({ newCustomers: sql<number>`count(*)::int` }).from(portalUsers)
         .where(sql`created_at >= now() - interval '7 days'`),
+      db.select({ mobileOrdersTotal: sql<number>`count(*)::int` }).from(portalOrders)
+        .where(eq(portalOrders.source, "mobile_app")),
+      db.select({ mobileOrdersNew: sql<number>`count(*)::int` }).from(portalOrders)
+        .where(and(eq(portalOrders.source, "mobile_app"), eq(portalOrders.status, "new"))),
+      db.select({ mobileOrdersInProgress: sql<number>`count(*)::int` }).from(portalOrders)
+        .where(and(eq(portalOrders.source, "mobile_app"), eq(portalOrders.status, "in_progress"))),
+      db.select({ mobileOrdersCompleted: sql<number>`count(*)::int` }).from(portalOrders)
+        .where(and(eq(portalOrders.source, "mobile_app"), eq(portalOrders.status, "completed"))),
+      db.select({ mobileOrdersValue: sql<string>`coalesce(sum(${portalOrders.total})::text,'0')` }).from(portalOrders)
+        .where(eq(portalOrders.source, "mobile_app")),
     ]);
-    res.json({ success: true, data: { totalCustomers, activeOrders, pendingTopups, totalWallet, newCustomers } });
+    res.json({
+      success: true,
+      data: {
+        totalCustomers, activeOrders, pendingTopups, totalWallet, newCustomers,
+        mobileOrdersTotal, mobileOrdersNew, mobileOrdersInProgress,
+        mobileOrdersCompleted, mobileOrdersValue,
+      },
+    });
   } catch (err) {
     logger.error({ err }, "portal admin stats error");
     res.status(500).json({ success: false, error: { code: "SERVER_ERROR" } });
@@ -162,12 +186,67 @@ router.get("/portal/admin/orders", requirePortalAdmin, async (req: Request, res:
   const page   = Math.max(1, parseInt(req.query.page as string || "1", 10));
   const limit  = Math.min(100, parseInt(req.query.limit as string || "20", 10));
   const offset = (page - 1) * limit;
+  const status = typeof req.query.status === "string" && ORDER_STATUSES.includes(req.query.status as typeof ORDER_STATUSES[number])
+    ? req.query.status as typeof ORDER_STATUSES[number]
+    : undefined;
+  const source = req.query.source === "website" || req.query.source === "mobile_app"
+    ? req.query.source
+    : undefined;
+  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+  const filters: SQL[] = [];
+  if (status) filters.push(eq(portalOrders.status, status));
+  if (source) filters.push(eq(portalOrders.source, source));
+  if (search) {
+    const like = `%${search}%`;
+    filters.push(or(
+      sql`${portalOrders.id}::text ilike ${like}`,
+      ilike(portalUsers.fullName, like),
+      ilike(portalUsers.email, like),
+      ilike(portalUsers.mobile, like),
+      ilike(portalProfiles.phone, like),
+      ilike(portalProfiles.whatsapp, like),
+    )!);
+  }
+  const where = filters.length > 0 ? and(...filters) : sql`true`;
   try {
     const [orders, [{ total }]] = await Promise.all([
-      db.select().from(portalOrders).orderBy(desc(portalOrders.createdAt)).limit(limit).offset(offset),
-      db.select({ total: sql<number>`count(*)::int` }).from(portalOrders),
+      db.select({
+        id: portalOrders.id,
+        referenceCode: sql<string>`${portalOrders.id}::text`,
+        userId: portalOrders.userId,
+        status: portalOrders.status,
+        source: portalOrders.source,
+        totalAmount: portalOrders.total,
+        currency: portalOrders.currency,
+        createdAt: portalOrders.createdAt,
+        customerName: portalUsers.fullName,
+        customerEmail: portalUsers.email,
+        customerMobile: sql<string | null>`coalesce(${portalUsers.mobile}, ${portalProfiles.phone}, ${portalProfiles.whatsapp})`,
+        serviceName: portalServices.nameEn,
+        packageName: portalPackages.nameEn,
+        paymentStatus: sql<string | null>`(
+          select "status" from "portal_payments"
+          where "order_id" = ${portalOrders.id}
+          order by "created_at" desc limit 1
+        )`,
+        paymentMethod: sql<string | null>`(
+          select "provider" from "portal_payments"
+          where "order_id" = ${portalOrders.id}
+          order by "created_at" desc limit 1
+        )`,
+      }).from(portalOrders)
+        .leftJoin(portalUsers, eq(portalOrders.userId, portalUsers.id))
+        .leftJoin(portalProfiles, eq(portalProfiles.userId, portalUsers.id))
+        .leftJoin(portalServices, eq(portalOrders.serviceId, portalServices.id))
+        .leftJoin(portalPackages, eq(portalOrders.packageId, portalPackages.id))
+        .where(where)
+        .orderBy(desc(portalOrders.createdAt)).limit(limit).offset(offset),
+      db.select({ total: sql<number>`count(*)::int` }).from(portalOrders)
+        .leftJoin(portalUsers, eq(portalOrders.userId, portalUsers.id))
+        .leftJoin(portalProfiles, eq(portalProfiles.userId, portalUsers.id))
+        .where(where),
     ]);
-    res.json({ success: true, data: orders, meta: { page, limit, total, pages: Math.ceil(total / limit) } });
+    res.json({ success: true, data: { orders, meta: { page, limit, total, pages: Math.ceil(total / limit) } } });
   } catch (err) {
     logger.error({ err }, "portal admin orders error");
     res.status(500).json({ success: false, error: { code: "SERVER_ERROR" } });
@@ -178,16 +257,51 @@ router.get("/portal/admin/orders/:id", requirePortalAdmin, async (req: Request, 
   const id = numId(req);
   if (!id) { res.status(400).json({ success: false, error: { code: "INVALID_ID" } }); return; }
   try {
-    const [[order], timeline, [campaign], files] = await Promise.all([
-      db.select().from(portalOrders).where(eq(portalOrders.id, id)).limit(1),
+    const [[orderRow], timeline, [campaign], files, payments] = await Promise.all([
+      db.select({
+        order: portalOrders,
+        referenceCode: sql<string>`${portalOrders.id}::text`,
+        customerName: portalUsers.fullName,
+        customerEmail: portalUsers.email,
+        customerMobile: sql<string | null>`coalesce(${portalUsers.mobile}, ${portalProfiles.phone}, ${portalProfiles.whatsapp})`,
+        serviceName: portalServices.nameEn,
+        packageName: portalPackages.nameEn,
+        packageDescription: portalPackages.descriptionEn,
+      }).from(portalOrders)
+        .leftJoin(portalUsers, eq(portalOrders.userId, portalUsers.id))
+        .leftJoin(portalProfiles, eq(portalProfiles.userId, portalUsers.id))
+        .leftJoin(portalServices, eq(portalOrders.serviceId, portalServices.id))
+        .leftJoin(portalPackages, eq(portalOrders.packageId, portalPackages.id))
+        .where(eq(portalOrders.id, id)).limit(1),
       db.select().from(portalOrderTimeline).where(eq(portalOrderTimeline.orderId, id))
         .orderBy(asc(portalOrderTimeline.createdAt)),
       db.select().from(portalCampaigns).where(eq(portalCampaigns.orderId, id)).limit(1),
       db.select().from(portalFiles).where(eq(portalFiles.orderId, id))
         .orderBy(desc(portalFiles.createdAt)),
+      db.select().from(portalPayments).where(eq(portalPayments.orderId, id))
+        .orderBy(desc(portalPayments.createdAt)),
     ]);
-    if (!order) { res.status(404).json({ success: false, error: { code: "NOT_FOUND" } }); return; }
-    res.json({ success: true, data: { ...order, timeline, campaign: campaign ?? null, files } });
+    if (!orderRow) { res.status(404).json({ success: false, error: { code: "NOT_FOUND" } }); return; }
+    const { order, ...orderDetails } = orderRow;
+    res.json({
+      success: true,
+      data: {
+        ...order,
+        ...orderDetails,
+        totalAmount: order.total,
+        timeline: timeline.map((entry) => ({ ...entry, notes: entry.note })),
+        campaign: campaign ?? null,
+        payments,
+        files: files.map((file) => ({
+          id: file.id,
+          fileName: file.filename,
+          fileSize: file.sizeBytes ?? 0,
+          mimeType: file.contentType,
+          createdAt: file.createdAt,
+          url: `/api/storage/${file.objectPath.replace(/^\/objects\//, "")}`,
+        })),
+      },
+    });
   } catch (err) {
     logger.error({ err }, "portal admin order detail error");
     res.status(500).json({ success: false, error: { code: "SERVER_ERROR" } });
